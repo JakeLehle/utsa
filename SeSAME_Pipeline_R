@@ -1,0 +1,129 @@
+getwd()
+setwd("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array")
+# Clean up the environment and remove all the sample object files
+rm(list = ls())
+# make sure you are using the most recent version of R
+install.packages("installr")
+library(installr)
+updateR()
+#/////////////////////////////////////////////////////////////////////////
+
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("sesame")
+browseVignettes("sesame")
+
+## ----message=FALSE, warning=FALSE, include=FALSE------------------------------
+options(rmarkdown.html_vignette.check_title = FALSE)
+
+## -----------------------------------------------------------------------------
+sapply(c("sesame","sesameData","ExperimentHub"),
+       function(x) as.character(packageVersion(x)))
+with(R.Version(), paste0(major, ".", minor))
+# This outputs the version of sesame, sesame data, and experiment hub as well as R 
+## ----message=FALSE------------------------------------------------------------
+library(sesame)
+# You need to run the sesameCache() command once after installation to make sure the data is retrieved 
+# This caches the sesameData package with uses the ExperimentHub infrastructure.
+library(knitr)
+library(SummarizedExperiment)
+library(ggrepel)
+library(pals)
+library(wheatmap)
+library(dplyr)
+library(RPMM)
+## -----------------------------------------------------------------------------
+tools::R_user_dir("ExperimentHub", which="cache")
+# This shows you location of the cached data on your computer. 
+
+######## SAMPLE DATA FROM MOUSE
+
+sesameDataCacheAll()
+
+# First create an object with the path to the IDAT file
+idat_dir = c("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array")
+idat_dir
+IDATprefixes <- searchIDATprefixes(idat_dir)
+IDATprefixes
+
+# Open the file and produce a beta matrix and sdfs list
+
+betas = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8))
+sdfs = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), func = NULL)
+
+# Infer mouse strains from single sdf IDAT pairs
+
+sample_strains <- list()
+for (strain in IDATprefixes) {
+  sdf <- readIDATpair(strain, platform = "MM285")
+  inferStrain(sdf, return.strain = TRUE)
+  sample_strains <- append(sample_strains, inferStrain(sdf, return.strain = TRUE))
+}
+sample_strains
+
+
+# If any of the strains look weird to you then you can manually check them and plot the probability of each strain in the sample.
+# For instance all samples look like BUB_BnJ except sample 22?
+# Lets plot first sample 1 then sample 22 and determine what's going on.
+sdf_1 <- readIDATpair("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/GSM5778405_Female-blastocyst-1358-6", platform = "MM285")
+sdf_22 <- readIDATpair("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/GSM5778431_Male-blastocyst-1620-2", platform = "MM285")
+
+p = inferStrain(sdf_22, return.probability = TRUE)
+df = data.frame(strain=names(p), probs=p)
+ggplot(data = df,  aes(x = strain, y = probs)) +
+  geom_bar(stat = "identity", color="gray") +
+  ggtitle("Strain Probabilities") +
+  ylab("Probability") + xlab("") +
+  scale_x_discrete(position = "top") +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust=0),
+        legend.position = "none")
+
+#Looks like BUB_BnJ only represents 0.2 of sample 22 the other 0.8 is C57BL_6
+# Fascinating stuff to keep in mind for your own studies to try and maintain high similarities in the backgrounds of your mouse samples or at leats bring it up when discussing results.
+# You can use this structure to also determine the ethnicity of Human samples which should be discussed in projects especially in the context of studying methylation patterns in underrepresented populations. 
+
+# Predict the average age of the samples in months from the beta values
+# Haha it's a negative number because these are samples are at day 2.5 to 4.5
+
+predictMouseAgeInMonth(betas[,1])
+
+# Sample preprocessing and quality control
+
+sdf_preped = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCD0PB", func=NULL)
+sdf_preped
+
+# Using our sdf's from sample 1 and 22 lets look at the probe signal clarity and subtract background.
+sdf_1.InfICorrected = inferInfiniumIChannel(sdf_1, verbose=TRUE)
+
+par(mfrow=c(2,1), mar=c(3,3,2,1))
+sesameQC_plotBetaByDesign(sdf_1, main="Before", xlab="\beta")
+sesameQC_plotBetaByDesign(noob(sdf_1), main="After", xlab="\beta")
+
+# Wow that data looks rough even cleaned up there is a lot of ambiguity at many of these probe sites leading to intermediate probe values.
+
+# Let's look at the dye bias for this experiment
+
+##### Dye Bias Correction 
+# Residual dye bias can be corrected using nonlinear quantile interpolation with type-1 probes.
+# Note non linear scaling does shift the beta values of type 1 probes keep that in mind if someone wants to see the raw un-scaled data.
+par(mfrow=c(1,2))
+sesameQC_plotRedGrnQQ(sdf_22, main="Before")   
+sesameQC_plotRedGrnQQ(dyeBiasL(sdf_22), main="After")  # linear correction
+
+# Go with nonlinear for better adjustment
+par(mfrow=c(1,2))
+sesameQC_plotRedGrnQQ(sdf_22, main="Before")
+sesameQC_plotRedGrnQQ(dyeBiasNL(sdf_22), main="After")  # nonlinear correction
+
+#QC of detection metric
+qcs = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="", func=sesameQC_calcStats, funs="detection")
+qcs_prep = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCD0PB", func=sesameQC_calcStats, funs="detection")
+
+qcs
+qcs_prep
+
+sesameQC_plotBar(qcs_prep)
+
+# The detection metrics were also disappointing at or around 75%
+
