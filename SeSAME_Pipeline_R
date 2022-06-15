@@ -46,6 +46,7 @@ idat_dir = c("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array")
 idat_dir
 IDATprefixes <- searchIDATprefixes(idat_dir)
 IDATprefixes
+basename(IDATprefixes)
 
 # Open the file and produce a beta matrix and sdfs list
 
@@ -55,15 +56,18 @@ sdfs = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), func = NUL
 # Infer mouse strains from single sdf IDAT pairs
 
 sample_strains <- list()
+#bis_conversion <- list()
 for (strain in IDATprefixes) {
   sdf <- readIDATpair(strain, platform = "MM285")
   inferStrain(sdf, return.strain = TRUE)
   sample_strains <- append(sample_strains, inferStrain(sdf, return.strain = TRUE))
 }
 sample_strains
+#bis_conversion <- append(bis_conversion, bisConversionControl(sdf))
 
 
 # If any of the strains look weird to you then you can manually check them and plot the probability of each strain in the sample.
+# For the bisulfite conversion check the bis_conversion list. All of the samples should have a value near 1 indicating full conversion of DNA. 
 # For instance all samples look like BUB_BnJ except sample 22?
 # Lets plot first sample 1 then sample 22 and determine what's going on.
 sdf_1 <- readIDATpair("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/GSM5778405_Female-blastocyst-1358-6", platform = "MM285")
@@ -92,6 +96,7 @@ predictMouseAgeInMonth(betas[,1])
 
 sdf_preped = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCD0PB", func=NULL)
 sdf_preped
+
 
 # Using our sdf's from sample 1 and 22 lets look at the probe signal clarity and subtract background.
 sdf_1.InfICorrected = inferInfiniumIChannel(sdf_1, verbose=TRUE)
@@ -127,3 +132,123 @@ sesameQC_plotBar(qcs_prep)
 
 # The detection metrics were also disappointing at or around 75%
 
+# Let's start our DMR analysis
+# To do this we need to create a summarized experiment object
+# The object itself will be built on our beta values calculated earlier
+# We will create a coldata dataframe object that will divide our object by IDAT file name, stage/age of the sample, and sex 
+# Fianlly I throw in a little hack to reassign the name of the assay so it will indicate it is recording beta values.
+betas_prep = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCD0PB")
+IDAT <- basename(IDATprefixes)
+stage <- c("blastocyst", "blastocyst", "blastocyst", "blastocyst", "blastocyst", "blastocyst", 
+           "morula", "morula", "morula", "morula", "morula", "morula", 
+           "natrual", "natrual", "natrual", "natrual", "natrual",
+           "blastocyst", "blastocyst", "blastocyst", "blastocyst", "blastocyst", "blastocyst",
+           "morula", "morula", "morula", "morula", "morula", "morula",
+           "natrual", "natrual", "natrual", "natrual", "natrual")
+sex <- c("Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", "Female", 
+         "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male", "Male")
+df <- data.frame(IDAT, stage, sex)
+df
+se <- SummarizedExperiment(assays = betas_prep, colData = df)
+names(assays(se)) <- c("betas") #hack hack hack
+se
+cd = as.data.frame(colData(se)); rownames(cd) = NULL
+cd
+
+## ----model3-------------------------------------------------------------------
+# To check DMR you have to exclude NA's use the checkLevels() function
+
+se_ok = (checkLevels(assay(se), colData(se)$sex) &
+           checkLevels(assay(se), colData(se)$stage))
+sum(se_ok)                      # the number of CpGs that passes
+se = se[se_ok,]
+
+## ----model4-------------------------------------------------------------------
+# Here they set the control cell as the colon and the control sex as female
+colData(se)$stage <- relevel(factor(colData(se)$stage), "natrual")
+colData(se)$sex <- relevel(factor(colData(se)$sex), "Female")
+
+## ----model5-------------------------------------------------------------------
+#Now we model DNA methylaton variation treating stage and sex as covariates. 
+#The DML will fit the DNA methylation reading to a linear model and perform the corresponding slope test and goodness-of-fit test (F-test holding out each contrast variable)
+#All of these results are returned in an object of class DMLSummary
+# This took ~4 hours on 6-15-22
+smry = DML(se, ~stage + sex, mc.cores = BiocParallel::SnowParam(8))
+smry
+
+#### TEST INERPRETATION
+## ----model6-------------------------------------------------------------------
+test_result = summaryExtractTest(smry)
+# Rows are CpG/Loci and columns contain the slopes and p-values for each variable
+colnames(test_result) # the column names, show four groups of statistics
+#EST The slope estimate (aka the β coefficient, not to be confused with the DNA methylation β-value though) for continuous variable. DNA methylation difference of the current level with respect to the reference level for nominal contrast variables. Each suffix is concatenated from the contrast variable name (e.g., tissue, sex) and the level name if the contrast variable is discrete (e.g, Cecum, Esophagus, Fat). For example, Est_tissueFat should be interpreted as the estimated methylation level difference of Fat compared to the reference tissue (which is Colon, as set above). There is a special column named Est_`(Intercept)`. It corresponds to the base-level methylation of the reference (in this case a Female Colon sample)
+#PVAL The unadjusted p-values of t-testing the slope. This represents the statistical significance of the methylation difference. For example, Pval_stageblasticyst tests whether the blastocyst is significantly different from the normal embryo (the reference level) in DNA methylation. The Pval_`(Intercept)` tests whether the reference level is significantly different from zero.
+#FPVAL The unadjusted p-value of the F-test contrasting the full model against a reduced model with the labeled contrast variable held out. Note that “Pval_” and “FPval_” are equivalent when the contrast variable is a 2-level factor, i.e., in the case of a pairwise comparison.
+#EFF The effect size of each normial contrast variable. This is equivalent to the maximum slope subtracted by the minimum level including the reference level (0).
+head(test_result)
+
+### For your project PVAL will be the most important metric to see here.
+## ----model7, message = FALSE--------------------------------------------------
+###### GOODNESS Of FIT
+# Another way to say this is.
+# Is the CpG methylation tissue-specific? Rather than. Is the CpG more methylated in cultured blastocysts compared to normal embryos?
+
+library(dplyr)
+install.packages("tidyr")
+library(tidyr)
+test_result %>% dplyr::filter(FPval_sex < 0.05, Eff_sex > 0.1) %>%
+  select(FPval_sex, Eff_sex)
+# Here we used 0.1 as the size threshold. This means a difference less than 10% is not considered biologically relevant and excluded. 
+## ----model8-------------------------------------------------------------------
+# We can go further and do a side by comparison of probes that are sex specific and onces that are cell type specific. 
+test_result %>%
+  mutate(sex_specific =
+           ifelse(FPval_sex < 0.05 & Eff_sex > 0.1, TRUE, FALSE)) %>%
+  mutate(stage_specific =
+           ifelse(FPval_stage < 0.05 & Eff_stage > 0.1, TRUE, FALSE)) %>%
+  select(sex_specific, stage_specific) %>% table
+
+## ----model9-------------------------------------------------------------------
+# Now we can plot this difference with a volcano plot to show the differences in probes for men compared to females
+library(ggplot2)
+ggplot(test_result) + geom_point(aes(Est_sexMale, -log10(Pval_sexMale)))
+
+## ----model10------------------------------------------------------------------
+# Here they are showing the same thing but with fat compared to colon
+ggplot(test_result) + geom_point(aes(Est_tissueFat, -log10(Pval_tissueFat)))
+
+## ----model11------------------------------------------------------------------
+# Here we can model these functions as continuous. This shows CpGs that are positively associated with age.
+smry2 = DML(se, ~ age + sex)
+test_result2 = summaryExtractTest(smry2) %>% arrange(Est_age)
+
+
+
+## ----model12------------------------------------------------------------------
+
+test_result2 %>% dplyr::select(Est_age, Pval_age) %>% tail # positive assoc.
+df = data.frame(Age = colData(se)$age,
+                BetaValue = assay(se)[rownames(test_result2)[nrow(test_result2)],])
+ggplot(df, aes(Age, BetaValue)) + geom_smooth(method="lm") + geom_point()
+
+###### DMR
+# Okay so the way that this works is if there are significant differences in a group of probes that are closely located together they can be merged into a region that they call a DMR.
+# You will then have to annotate these regions seperately to figure out if they are in promoter regions or gene regions use the wg-blimp script for this.
+## ----model13, eval=TRUE-------------------------------------------------------
+dmContrasts(smry)                       # pick a contrast from below
+merged = DMR(se, smry, "sexMale")       # merge CpGs to regions / segments
+merged %>% dplyr::filter(Seg_Pval_adj < 0.01)
+
+##### TRACK VIEW
+# Sesame provides utilities for viewing methylation in a track view.
+betas <- sesameDataGet('HM450.10.TCGA.PAAD.normal') # Load sample data
+
+# Here is where you can call out specific regions and get the probe names
+visualizeRegion(
+  'chr19',10260000,10380000, betas, platform='HM450',
+  show.probeNames = FALSE)
+
+# You can also do this by gene
+visualizeGene('DNMT1', betas, platform='HM450')
+# You can also do this by probe name
+visualizeProbes(c("cg02382400", "cg03738669"), betas, platform='HM450')
