@@ -33,6 +33,8 @@ library(pals)
 library(wheatmap)
 library(dplyr)
 library(RPMM)
+
+load("Sesame_Mouse_Bartolomei_Data.RData")
 ## -----------------------------------------------------------------------------
 tools::R_user_dir("ExperimentHub", which="cache")
 # This shows you location of the cached data on your computer. 
@@ -175,6 +177,8 @@ colData(se)$sex <- relevel(factor(colData(se)$sex), "Female")
 # This took ~4 hours on 6-15-22
 smry = DML(se, ~stage + sex, mc.cores = BiocParallel::SnowParam(8))
 smry
+save.image("Sesame_Mouse_Bartolomei_Data.RData")
+
 
 #### TEST INERPRETATION
 ## ----model6-------------------------------------------------------------------
@@ -215,40 +219,39 @@ ggplot(test_result) + geom_point(aes(Est_sexMale, -log10(Pval_sexMale)))
 
 ## ----model10------------------------------------------------------------------
 # Here they are showing the same thing but with fat compared to colon
-ggplot(test_result) + geom_point(aes(Est_tissueFat, -log10(Pval_tissueFat)))
+ggplot(test_result) + geom_point(aes(Est_stageblastocyst, -log10(Pval_stageblastocyst)))
 
 ## ----model11------------------------------------------------------------------
 # Here we can model these functions as continuous. This shows CpGs that are positively associated with age.
-smry2 = DML(se, ~ age + sex)
-test_result2 = summaryExtractTest(smry2) %>% arrange(Est_age)
+smry2 = DML(se, ~ stage + sex, mc.cores = BiocParallel::SnowParam(8))
+test_result2 = summaryExtractTest(smry2) %>% arrange(Est_stageblastocyst)
 
 
 
 ## ----model12------------------------------------------------------------------
 
-test_result2 %>% dplyr::select(Est_age, Pval_age) %>% tail # positive assoc.
-df = data.frame(Age = colData(se)$age,
+test_result2 %>% dplyr::select(Est_stageblastocyst, Pval_stageblastocyst) %>% tail # positive assoc.
+df = data.frame(Stage = colData(se)$stage,
                 BetaValue = assay(se)[rownames(test_result2)[nrow(test_result2)],])
-ggplot(df, aes(Age, BetaValue)) + geom_smooth(method="lm") + geom_point()
+ggplot(df, aes(Stage, BetaValue)) + geom_smooth(method="lm") + geom_point()
 
 ###### DMR
 # Okay so the way that this works is if there are significant differences in a group of probes that are closely located together they can be merged into a region that they call a DMR.
 # You will then have to annotate these regions seperately to figure out if they are in promoter regions or gene regions use the wg-blimp script for this.
 ## ----model13, eval=TRUE-------------------------------------------------------
 dmContrasts(smry)                       # pick a contrast from below
-merged = DMR(se, smry, "sexMale")       # merge CpGs to regions / segments
+merged = DMR(se, smry, "stageblastocyst")       # merge CpGs to regions / segments
 merged %>% dplyr::filter(Seg_Pval_adj < 0.01)
 
 ##### TRACK VIEW
 # Sesame provides utilities for viewing methylation in a track view.
-betas <- sesameDataGet('HM450.10.TCGA.PAAD.normal') # Load sample data
 
 # Here is where you can call out specific regions and get the probe names
 visualizeRegion(
-  'chr19',10260000,10380000, betas, platform='HM450',
-  show.probeNames = FALSE)
+  'chr1',87475582,87475602, betas_prep, platform='MM285',
+  show.probeNames = TRUE)
 
 # You can also do this by gene
-visualizeGene('DNMT1', betas, platform='HM450')
+visualizeGene('DNMT1', betas_prep, platform='MM285')
 # You can also do this by probe name
-visualizeProbes(c("cg02382400", "cg03738669"), betas, platform='HM450')
+visualizeProbes(c("cg41674038_BC21", "cg28110595_TC21"), betas_prep, platform='MM285')
