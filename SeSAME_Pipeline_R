@@ -200,8 +200,7 @@ head(test_result)
 library(dplyr)
 install.packages("tidyr")
 library(tidyr)
-test_result %>% dplyr::filter(FPval_sex < 0.05, Eff_sex > 0.1) %>%
-  select(FPval_sex, Eff_sex)
+stage_specific <- test_result %>% dplyr::filter(FPval_stage < 0.05, Eff_stage > 0.1) %>% select(FPval_stage, Eff_stage)
 # Here we used 0.1 as the size threshold. This means a difference less than 10% is not considered biologically relevant and excluded. 
 ## ----model8-------------------------------------------------------------------
 # We can go further and do a side by comparison of probes that are sex specific and onces that are cell type specific. 
@@ -255,3 +254,12 @@ visualizeRegion(
 visualizeGene('DNMT1', betas_prep, platform='MM285')
 # You can also do this by probe name
 visualizeProbes(c("cg41674038_BC21", "cg28110595_TC21"), betas_prep, platform='MM285')
+
+
+######### KNOW YOU CpGs ###########
+# Let's see if there an enrichment of probes in the stage_specific differential methylated loci regions within one of the prob groups
+query <- rownames(stage_specific)
+query
+results_stage_specific <- testEnrichment(query)
+
+KYCG_plotEnrichAll(results_stage_specific)
