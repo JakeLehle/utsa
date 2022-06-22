@@ -60,28 +60,41 @@ IDATprefixes <- searchIDATprefixes(idat_dir)
 IDATprefixes
 basename(IDATprefixes)
 
+# This section will show you how to look at certain aspects of the pre-processing steps and produce graphs that visualize the changes that you are making.
+# These graphs are what you should use in a supplemental section to show the corrections that you are doing to the data.
+# This is what the final processing step will look like lets go over what each of the letters in the "prep" step indicate.
+
+sdf_preped = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCDPB", func=NULL)
+sdf_preped
+# T: Infer strain, set mask.
+# Q: Mask probes of poor design.
+# C: Infer infinium channel intensity.
+# D: Dye bias correction (non-linear)
+# P: Detection of p-value masking using oob
+# B: Equivalent to noob() background subtraction using oob
+
+# Now that you know what each step of the final process will be lets go through steps and see the graphs that you can make from each 
+
 # Open the file and produce a beta matrix and sdfs list
 
 betas = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8))
 sdfs = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), func = NULL)
 
-# Infer mouse strains from single sdf IDAT pairs
+# Infer mouse strains from single sdf IDAT pairs. This is equivalent to the prep = "T" step.
 
 sample_strains <- list()
-#bis_conversion <- list()
+
 for (strain in IDATprefixes) {
   sdf <- readIDATpair(strain, platform = "MM285")
   inferStrain(sdf, return.strain = TRUE)
   sample_strains <- append(sample_strains, inferStrain(sdf, return.strain = TRUE))
 }
 sample_strains
-#bis_conversion <- append(bis_conversion, bisConversionControl(sdf))
-
 
 # If any of the strains look weird to you then you can manually check them and plot the probability of each strain in the sample.
-# For the bisulfite conversion check the bis_conversion list. All of the samples should have a value near 1 indicating full conversion of DNA. 
 # For instance all samples look like BUB_BnJ except sample 22?
 # Lets plot first sample 1 then sample 22 and determine what's going on.
+
 sdf_1 <- readIDATpair("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/GSM5778405_Female-blastocyst-1358-6", platform = "MM285")
 sdf_22 <- readIDATpair("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/GSM5778431_Male-blastocyst-1620-2", platform = "MM285")
 
@@ -99,25 +112,26 @@ ggplot(data = df,  aes(x = strain, y = probs)) +
 # Fascinating stuff to keep in mind for your own studies to try and maintain high similarities in the backgrounds of your mouse samples or at leats bring it up when discussing results.
 # You can use this structure to also determine the ethnicity of Human samples which should be discussed in projects especially in the context of studying methylation patterns in underrepresented populations. 
 
-# Predict the average age of the samples in months from the beta values
+# You can even take this infomation futher and predict the average age of the samples in months from the beta values
 # Haha it's a negative number because these are samples are at day 2.5 to 4.5
 
 predictMouseAgeInMonth(betas[,1])
 
+##### Area under construction. Move along.
+#bis_conversion <- list()
+#bis_conversion <- append(bis_conversion, bisConversionControl(sdf))
+# For the bisulfite conversion check the bis_conversion list. All of the samples should have a value near 1 indicating full conversion of DNA. 
+
+
 # Sample preprocessing and quality control
 
-sdf_preped = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCD0PB", func=NULL)
+sdf_preped = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCDPB", func=NULL)
 sdf_preped
 
 
-# Using our sdf's from sample 1 and 22 lets look at the probe signal clarity and subtract background.
+# Using our sdf's from sample 1 and 22 lets look at the probe signal clarity and subtract background. 
+# Fist let's infer the signal intensity from the sample to avoid bias coming from different iscan devices. This is equivalent to prep="C"
 sdf_1.InfICorrected = inferInfiniumIChannel(sdf_1, verbose=TRUE)
-
-par(mfrow=c(2,1), mar=c(3,3,2,1))
-sesameQC_plotBetaByDesign(sdf_1, main="Before", xlab="\beta")
-sesameQC_plotBetaByDesign(noob(sdf_1), main="After", xlab="\beta")
-
-# Wow that data looks rough even cleaned up there is a lot of ambiguity at many of these probe sites leading to intermediate probe values.
 
 # Let's look at the dye bias for this experiment
 
@@ -125,17 +139,30 @@ sesameQC_plotBetaByDesign(noob(sdf_1), main="After", xlab="\beta")
 # Residual dye bias can be corrected using nonlinear quantile interpolation with type-1 probes.
 # Note non linear scaling does shift the beta values of type 1 probes keep that in mind if someone wants to see the raw un-scaled data.
 par(mfrow=c(1,2))
-sesameQC_plotRedGrnQQ(sdf_22, main="Before")   
-sesameQC_plotRedGrnQQ(dyeBiasL(sdf_22), main="After")  # linear correction
+sesameQC_plotRedGrnQQ(sdf_1.InfICorrected, main="Before")   
+sesameQC_plotRedGrnQQ(dyeBiasL(sdf_1.InfICorrected), main="After")  # linear correction
 
 # Go with nonlinear for better adjustment
 par(mfrow=c(1,2))
-sesameQC_plotRedGrnQQ(sdf_22, main="Before")
-sesameQC_plotRedGrnQQ(dyeBiasNL(sdf_22), main="After")  # nonlinear correction
+sesameQC_plotRedGrnQQ(sdf_1.InfICorrected, main="Before")
+sesameQC_plotRedGrnQQ(dyeBiasNL(sdf_1.InfICorrected), main="After")  # nonlinear correction
+
+sdf_1.InfICorrected <- dyeBiasNL(sdf_1.InfICorrected)
+
+###### Background Subtraction
+# Let's now look at background subtraction using oob. Equivalent to prep="B" 
+
+par(mfrow=c(2,1), mar=c(3,3,2,1))
+sesameQC_plotBetaByDesign(sdf_1.InfICorrected, main="Before", xlab="\beta")
+sesameQC_plotBetaByDesign(noob(sdf_1.InfICorrected), main="After", xlab="\beta")
+
+# Wow that data looks rough even cleaned up there is a lot of ambiguity at many of these probe sites leading to intermediate probe values.
+# However, this isn't my data, so not my problem. You now have an example of how to go through pre-processing and displayt these changes visually.
+# Let's look at some other quality control metrics that can give us an idea of how good our data is (or in this case how bad haha).
 
 #QC of detection metric
 qcs = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="", func=sesameQC_calcStats, funs="detection")
-qcs_prep = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCD0PB", func=sesameQC_calcStats, funs="detection")
+qcs_prep = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCDPB", func=sesameQC_calcStats, funs="detection")
 
 qcs
 qcs_prep
@@ -144,12 +171,13 @@ sesameQC_plotBar(qcs_prep)
 
 # The detection metrics were also disappointing at or around 75%
 
+########### DMR Analysis
 # Let's start our DMR analysis
 # To do this we need to create a summarized experiment object
 # The object itself will be built on our beta values calculated earlier
 # We will create a coldata dataframe object that will divide our object by IDAT file name, stage/age of the sample, and sex 
 # Fianlly I throw in a little hack to reassign the name of the assay so it will indicate it is recording beta values.
-betas_prep = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCD0PB")
+betas_prep = openSesame(IDATprefixes, BPPARAM = BiocParallel::SnowParam(8), prep="TQCDPB")
 IDAT <- basename(IDATprefixes)
 stage <- c("blastocyst", "blastocyst", "blastocyst", "blastocyst", "blastocyst", "blastocyst", 
            "morula", "morula", "morula", "morula", "morula", "morula", 
@@ -167,7 +195,6 @@ se
 cd = as.data.frame(colData(se)); rownames(cd) = NULL
 cd
 
-## ----model3-------------------------------------------------------------------
 # To check DMR you have to exclude NA's use the checkLevels() function
 
 se_ok = (checkLevels(assay(se), colData(se)$sex) &
@@ -175,12 +202,10 @@ se_ok = (checkLevels(assay(se), colData(se)$sex) &
 sum(se_ok)                      # the number of CpGs that passes
 se = se[se_ok,]
 
-## ----model4-------------------------------------------------------------------
 # Here they set the control cell as the colon and the control sex as female
 colData(se)$stage <- relevel(factor(colData(se)$stage), "natrual")
 colData(se)$sex <- relevel(factor(colData(se)$sex), "Female")
 
-## ----model5-------------------------------------------------------------------
 #Now we model DNA methylaton variation treating stage and sex as covariates. 
 #The DML will fit the DNA methylation reading to a linear model and perform the corresponding slope test and goodness-of-fit test (F-test holding out each contrast variable)
 #All of these results are returned in an object of class DMLSummary
@@ -189,9 +214,7 @@ smry = DML(se, ~stage + sex, mc.cores = BiocParallel::SnowParam(8))
 smry
 save.image("Sesame_Mouse_Bartolomei_Data.RData")
 
-
 #### TEST INERPRETATION
-## ----model6-------------------------------------------------------------------
 test_result = summaryExtractTest(smry)
 # Rows are CpG/Loci and columns contain the slopes and p-values for each variable
 colnames(test_result) # the column names, show four groups of statistics
@@ -202,18 +225,12 @@ colnames(test_result) # the column names, show four groups of statistics
 head(test_result)
 
 ### For your project PVAL will be the most important metric to see here.
-## ----model7, message = FALSE--------------------------------------------------
 ###### GOODNESS Of FIT
 # Another way to say this is.
 # Is the CpG methylation tissue-specific? Rather than. Is the CpG more methylated in cultured blastocysts compared to normal embryos?
-
-library(dplyr)
-install.packages("tidyr")
-library(tidyr)
-
 # Here we used 0.1 as the size threshold. This means a difference less than 10% is not considered biologically relevant and excluded. 
-## ----model8-------------------------------------------------------------------
-# We can go further and do a side by comparison of probes that are sex specific and onces that are cell type specific. 
+# We can go further and do a side by comparison of probes that are sex specific and ones that are cell type specific. 
+
 test_result %>%
   mutate(sex_specific =
            ifelse(FPval_sex < 0.05 & Eff_sex > 0.1, TRUE, FALSE)) %>%
@@ -246,31 +263,79 @@ ggvenn(specific_list,
 
 #Use this list to find out if any class or probes are enriched in the population
 stage_specific <- test_result %>% dplyr::filter(FPval_stage < 0.05, Eff_stage > 0.1) %>% select(FPval_stage, Eff_stage)
+stage_specific
 # Let's see if there an enrichment of probes in the stage_specific differential methylated loci regions within one of the prob groups
 query <- rownames(stage_specific)
 query
 results_stage_specific <- testEnrichment(query)
 KYCG_plotEnrichAll(results_stage_specific)
 # How cools is that this shows that there is a enrichment of methylation diffrences at Imprinted DMRs which has ben shown previously as well as a number of other sites like H19, Gene Bodies, Enhancers, Pesudogene TSS's, etc
-results_stage_specific %>% dplyr::filter(overlap>10)
+results_stage_specific
+results_stage_specific_filtered <- results_stage_specific %>% dplyr::filter(overlap>10)
+KYCG_plotEnrichAll(results_stage_specific_filtered)
 
-## ----model9-------------------------------------------------------------------
+
+
 # Now we can plot this difference with a volcano plot to show the differences in probes for men compared to females
 library(ggplot2)
 ggplot(test_result) + geom_point(aes(Est_sexMale, -log10(Pval_sexMale)))
 
-## ----model10------------------------------------------------------------------
 # Here they are showing the same thing but with blastocysts compared to normal embryos
-ggplot(test_result) + geom_point(aes(Est_stageblastocyst, -log10(Pval_stageblastocyst)))
+ggplot(test_result)+ geom_point(aes(Est_stageblastocyst, -log10(Pval_stageblastocyst)))
+# Let's make it pretty but focus on plotting the false discovery rate or FPval for stage specific changes as it relates to changes in beta values.
 
-## ----model11------------------------------------------------------------------
-# Here we can model these functions as continuous. This shows CpGs that are positively associated with age.
+
+test_result_pretty <- test_result
+test_result_pretty$Methylation
+
+test_result_pretty <- test_result_pretty %>%
+  mutate(
+    Significance = case_when(
+      FPval_stage <= 0.05 & FPval_stage > 0.01 ~ "FDR 0.05",
+      FPval_stage <= 0.01 & FPval_stage > 0.001 ~ "FDR 0.01",
+      FPval_stage <= 0.001 ~ "FDR 0.001",
+      TRUE ~ "Unchanged"),
+    Methylation = case_when(
+      Est_stageblastocyst > 0 ~ "Hyper",
+      Est_stageblastocyst < 0 ~ "Hypo",
+      TRUE ~ "Unchanged")
+  )
+
+# Side note. Quick way to find out how many of the probes are either hyper or hypo methylated in blastocysts samples compared to controls.
+test_result_pretty %>%
+  count(Methylation)
+# Now with significance added for stage specific changes 
+test_result_pretty %>%
+  count(Methylation, Significance)
+
+# Let's find out the higest and lowest changes in methylation in our groups
+
+top_10 <- 10
+top_probes <- bind_rows(
+  test_result_pretty %>%
+    filter(Methylation == 'Hyper') %>%
+    arrange(FPval_stage, desc(abs(Pval_stageblastocyst))) %>%
+    head(top_10),
+  test_result_pretty %>%
+    filter(Methylation == 'Hypo') %>%
+    arrange(FPval_stage, desc(abs(Pval_stageblastocyst))) %>%
+    head(top_10)
+)
+
+test_result_pretty$Est_Probe_ID
+
+ggplot(test_result_pretty, aes(Est_stageblastocyst, -log10(Pval_stageblastocyst))) +
+  geom_point(aes(color = Significance), size = 2/5) +
+  scale_color_viridis_d() +
+  guides(colour = guide_legend(override.aes = list(size=1.5))) +
+  geom_label_repel(data = top_probes,
+                   mapping = aes(Est_stageblastocyst, -log(Pval_stageblastocyst,10), label = Est_Probe_ID),
+                   size = 2, max.overlaps = 20)
+
+
+# Here we can model these functions as continuous. This shows CpGs that are positively associated with length of culture conditions.
 smry2 = DML(se, ~ stage + sex, mc.cores = BiocParallel::SnowParam(8))
 test_result2 = summaryExtractTest(smry2) %>% arrange(Est_stageblastocyst)
-
-
-
-## ----model12------------------------------------------------------------------
 
 test_result2 %>% dplyr::select(Est_stageblastocyst, Pval_stageblastocyst) %>% tail # positive assoc.
 df = data.frame(Stage = colData(se)$stage,
