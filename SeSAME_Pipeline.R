@@ -42,6 +42,8 @@ library("ggVennDiagram")
 if (!require(devtools)) install.packages("devtools")
 devtools::install_github("yanlinlin82/ggvenn")
 library("ggvenn")
+install.packages('gprofiler2')  
+library(gprofiler2)
 
 
 load("Sesame_Mouse_Bartolomei_Data.RData")
@@ -98,15 +100,18 @@ sample_strains
 sdf_1 <- readIDATpair("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/GSM5778405_Female-blastocyst-1358-6", platform = "MM285")
 sdf_22 <- readIDATpair("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/GSM5778431_Male-blastocyst-1620-2", platform = "MM285")
 
-p = inferStrain(sdf_22, return.probability = TRUE)
-df = data.frame(strain=names(p), probs=p)
-ggplot(data = df,  aes(x = strain, y = probs)) +
+p = inferStrain(sdf_1, return.probability = TRUE)
+df_sdf1 = data.frame(strain=names(p), probs=p)
+ggplot(data = df_sdf1,  aes(x = strain, y = probs)) +
   geom_bar(stat = "identity", color="gray") +
   ggtitle("Strain Probabilities") +
   ylab("Probability") + xlab("") +
   scale_x_discrete(position = "top") +
   theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust=0),
         legend.position = "none")
+
+# You can also use this comparison tool but this is much harder to tell what is going on here the BALB cj color lines up both on the column and row indicating goo alignment. However other strains alos have alignment so it's not the best way to display this information.
+compareMouseStrainReference(getBetas(sdf_1))
 
 #Looks like BUB_BnJ only represents 0.2 of sample 22 the other 0.8 is C57BL_6
 # Fascinating stuff to keep in mind for your own studies to try and maintain high similarities in the backgrounds of your mouse samples or at leats bring it up when discussing results.
@@ -116,12 +121,6 @@ ggplot(data = df,  aes(x = strain, y = probs)) +
 # Haha it's a negative number because these are samples are at day 2.5 to 4.5
 
 predictMouseAgeInMonth(betas[,1])
-
-##### Area under construction. Move along.
-#bis_conversion <- list()
-#bis_conversion <- append(bis_conversion, bisConversionControl(sdf))
-# For the bisulfite conversion check the bis_conversion list. All of the samples should have a value near 1 indicating full conversion of DNA. 
-
 
 # Sample preprocessing and quality control
 
@@ -273,8 +272,21 @@ KYCG_plotEnrichAll(results_stage_specific)
 results_stage_specific
 results_stage_specific_filtered <- results_stage_specific %>% dplyr::filter(overlap>10)
 KYCG_plotEnrichAll(results_stage_specific_filtered)
+# Let's rank these by significance
+KYCG_plotWaterfall(results_stage_specific_filtered)
 
+# To dig more into each group we need to see what groups are available which can be done using the list database groups function.
+KYCG_listDBGroups("MM285")
+# Now that we can look at individual groups we can start pulling apart some of the data we are seeing from our enrich all data
+# First let's do a dot plot of the design group to see which of the design groups are most differentially methylated
+results_stage_specific_designGroup <- testEnrichment(query, "designGroup", platform = "MM285")
+KYCG_plotDot(results_stage_specific_designGroup, n_max=20)
+# Next to find out more about if a region is hyper or hypo methylated lets to a volcano plot this time using the chromHMM group.
+results_2tailed <- testEnrichment(query, "chromHMM", alternative = "two.sided", platform = "MM285")
+KYCG_plotVolcano(results_2tailed)
 
+# You can see from this that there is quite a bit of data that you can already get and this might help you to determine what group to look into more. 
+# However let's go back and look at all of our probes in the DML group and find out the ones that have the largest differences.
 
 # Now we can plot this difference with a volcano plot to show the differences in probes for men compared to females
 library(ggplot2)
@@ -332,6 +344,14 @@ ggplot(test_result_pretty, aes(Est_stageblastocyst, -log10(Pval_stageblastocyst)
                    mapping = aes(Est_stageblastocyst, -log(Pval_stageblastocyst,10), label = Est_Probe_ID),
                    size = 2, max.overlaps = 20)
 
+#Okay now that you have the 10 most significant hyper and hypo methylated probes you can visualize them on the genome using this function
+
+visualizeProbes(c("cg30118034_TC11"), betas_prep, platform='MM285')
+
+# Oh wow that probe is located in the promoter of Bptf the bromodomain protein that has been linked to Alzhymers 
+# Let's call that region out by gene now.
+
+visualizeGene('Bptf', betas_prep, platform='MM285')
 
 # Here we can model these functions as continuous. This shows CpGs that are positively associated with length of culture conditions.
 smry2 = DML(se, ~ stage + sex, mc.cores = BiocParallel::SnowParam(8))
@@ -345,135 +365,33 @@ ggplot(df, aes(Stage, BetaValue)) + geom_smooth(method="lm") + geom_point()
 ###### DMR
 # Okay so the way that this works is if there are significant differences in a group of probes that are closely located together they can be merged into a region that they call a DMR.
 # You will then have to annotate these regions seperately to figure out if they are in promoter regions or gene regions use the wg-blimp script for this.
-## ----model13, eval=TRUE-------------------------------------------------------
 dmContrasts(smry)                       # pick a contrast from below
 merged = DMR(se, smry, "stageblastocyst")       # merge CpGs to regions / segments
-merged %>% dplyr::filter(Seg_Pval_adj < 0.01)
-
-##### TRACK VIEW
-# Sesame provides utilities for viewing methylation in a track view.
+DMR <- merged %>% dplyr::filter(Seg_Pval_adj < 0.01) %>% arrange(Seg_Pval_adj)
+DMR
 
 # Here is where you can call out specific regions and get the probe names
 visualizeRegion(
-  'chr1',87475582,87475602, betas_prep, platform='MM285',
+  'chr11',22971841,22972953, betas_prep, platform='MM285',
   show.probeNames = TRUE)
+#Turns out this is a DMR for a zinc finger binding protein that is important for mRNA processing.
 
-# You can also do this by gene
-visualizeGene('Peg3', betas_prep, platform='MM285')
-# You can also do this by probe name
-visualizeProbes(c("cg41674038_BC21", "cg28110595_TC21"), betas_prep, platform='MM285')
+######## GO Analysis 
 
+#Start with a probe list. For this example let's use the probes that are specific for blastocysts.
 
-######### KNOW YOU CpGs ###########
+blastocysts_genes <- sesameData_getGenesByProbes(stage_specific_rn)
+blastocysts_genes
 
-
-## ----ky2, message=FALSE-------------------------------------------------------
-# Test the enrichment over database groups, KYCG will by default select all the categorical groups and overlapping genes (CpGs assocaited with a gene)
-possible_query <- KYCG_getDBs("MM285.designGroup")
-# All the possible querys will be included as attributes of this possible_query object
-# For example this will show you long-noncoding RNA TSS's 
-possible_query$lincRNATSS
-query <- KYCG_getDBs("MM285.designGroup")[["lincRNATSS"]]
-
-class(query)
-head(query)
-
-## ----ky3, fig.width=8, fig.height=5, message=FALSE----------------------------
-results_lincRNATSS <- testEnrichment(query)
-head(results_lincRNATSS)
-
-## ----ky4----------------------------------------------------------------------
-install.packages('ggrepel')
-library(ggrepel)
-KYCG_plotEnrichAll(results_lincRNATSS)
-# This plot groups different database sets along the x-axis and the false discovery rate on the y axis.
-# Use to see if there is an enrichment of a certain type of mark in the dataset.
-## ----ky9, echo = FALSE, results="asis"----------------------------------------
-# There are four testing senarios which you should look into in more detail for each experiment.
-library(knitr)
-df = data.frame(
-  "Continuous DB"=c("Correlation-based","GSEA"),
-  "Discrete DB"=c("GSEA","Fisher's Exact Test"))
-rownames(df) = c("Continuous Query", "Discrete Query")
-kable(df, caption="Four KnowYourCG Testing Scenarios")
-
-## ----ky10, run-test-single, echo=TRUE, eval=TRUE, message=FALSE---------------
-library(SummarizedExperiment)
-
-#Here we show how the function test enrichment will determine the enrichment of a given set of probes in the database for a categorical query
-## prepare a query
-df <- rowData(sesameDataGet('MM285.tissueSignature'))
-query <- df$Probe_ID[df$branch == "fetal_brain" & df$type == "Hypo"]
-# this looks like hypo methylated probes in fetal brain tissue
-results <- testEnrichment(query, "TFBS")
-results %>% dplyr::filter(overlap>10) %>% head
-
-# Cool this output the hypomethylated genes were stuff like oct4, lhx3, sox3 that's really cool. Indicated how they are being expressed in brain deveopment.
-## prepare another query
-query <- df$Probe_ID[df$branch == "fetal_liver" & df$type == "Hypo"]
-results <- testEnrichment(query, "TFBS")
-results %>% dplyr::filter(overlap>10) %>%
-  dplyr::select(dbname, estimate, test, FDR) %>% head
-# Nice now we have stuff like Gata1,2, or Smad1 in fetal liver.
-## ----ky5, list-data, eval=TRUE, echo=TRUE-------------------------------------
-# Here is a list of all of the databases that can be used for mouse
-KYCG_listDBGroups("MM285")
-
-## ----ky6, cache-data, eval=TRUE, warning=FALSE--------------------------------
-dbs <- KYCG_getDBs("MM285.design")
-dbs
-# Here is a list of all of the probes that are from each group
-## ----ky7, view-data1, eval=TRUE, warning=FALSE--------------------------------
-str(dbs[["PGCMeth"]])
-
-## ----ky8, message=FALSE-------------------------------------------------------
-df <- rowData(sesameDataGet('MM285.tissueSignature'))
-query <- df$Probe_ID[df$branch == "B_cell"]
-head(query)
-
-## ----ky16, fig.width=7, fig.height=6, echo=TRUE, warning=FALSE, message=FALSE----
-query <- names(sesameData_getProbesByGene("Dnmt3a", "MM285"))
-results <- testEnrichment(query, KYCG_buildGeneDBs(query, max_distance=100000))
-results[,c("dbname","estimate","gene_name","FDR", "nQ", "nD", "overlap")]
-
-## ----ky17, fig.width=5, fig.height=4, echo=TRUE-------------------------------
-KYCG_plotLollipop(results, label="gene_name")
-
-## ----ky18, message=FALSE------------------------------------------------------
-### GO ANANLYSIS
-df <- rowData(sesameDataGet('MM285.tissueSignature'))
-df
-query <- df$Probe_ID[df$branch == "fetal_liver" & df$type == "Hypo"]
-query
-genes <- sesameData_getGenesByProbes(query)
-genes
-
-## ----ky19, eval = FALSE-------------------------------------------------------
-install.packages('gprofiler2')  
-library(gprofiler2)
-#  
 #  ## use gene name
-gostres <- gost(genes$gene_name, organism = "mmusculus")
+gostres <- gost(blastocysts_genes$gene_name, organism = "mmusculus")
 gostres$result[order(gostres$result$p_value),]
 gostplot(gostres)
 #  
 ## use Ensembl gene ID, note we need to remove the version suffix
-gene_ids <- sapply(strsplit(names(genes),"\\."), function(x) x[1])
+gene_ids <- sapply(strsplit(names(blastocysts_genes),"\\."), function(x) x[1])
 gostres <- gost(gene_ids, organism = "mmusculus")
 gostres$result[order(gostres$result$p_value),]
 gostplot(gostres)
 
-## ----ky21, run-test-data, echo=TRUE, eval=TRUE, message=FALSE-----------------
-query <- KYCG_getDBs("KYCG.MM285.designGroup")[["TSS"]]
-
-## ----ky22, echo=TRUE, eval=TRUE, message=FALSE--------------------------------
-res <- testEnrichmentGSEA(query, "MM285.seqContextN")
-res[, c("dbname", "test", "estimate", "FDR", "nQ", "nD", "overlap")]
-
-## ----ky23, warning=FALSE, eval=FALSE------------------------------------------
-beta_values <- getBetas(sesameDataGet("MM285.1.SigDF"))
-res <- testEnrichmentGSEA(beta_values, "MM285.chromHMM")
-res[, c("dbname", "test", "estimate", "FDR", "nQ", "nD", "overlap")]
-
-## -----------------------------------------------------------------------------
-sessionInfo()
+# Both will give you the same thing.
