@@ -395,3 +395,71 @@ gostres$result[order(gostres$result$p_value),]
 gostplot(gostres)
 
 # Both will give you the same thing.
+
+#Repeat Masker selection
+#Download the Repeat Masker database file from UCSC at https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=1219084465_HRDjHL1J6LoO4NKjTqqdzM3L9RS0&clade=mammal&org=Mouse&db=mm39&hgta_group=allTracks&hgta_track=rmsk&hgta_table=0&hgta_regionType=genome&position=chr12%3A56%2C741%2C761-56%2C761%2C390&hgta_outputType=primaryTable&hgta_outFileName=rptmsk-GRCm38.csv
+#Read the file into R
+rptmsk <- read.csv(file="rptmsk-GRCm38.csv")
+rptmsk
+
+rptmsk_DMR <- DMR
+rptmsk_DMR <- arrange(rptmsk_DMR, rptmsk_DMR$Seg_Chrm)
+rptmsk_DMR
+rptmsk_ordered <- rptmsk
+rptmsk_ordered
+rptmsk_ordered <- arrange(rptmsk_ordered, rptmsk_ordered$genoName)
+rptmsk_DMR[1,2]
+rptmsk_ordered[1,6]
+#### REMOVE ROWS WITH NA
+rptmsk_DMR <- rptmsk_DMR %>% drop_na(Seg_Start)
+rptmsk_DMR
+rptmsk_ordered
+
+
+###### PRACTICE MAKE PERFECT
+x <- data.frame("Address_line1" = c("123","21"), 
+                "City" = c("Chicago","London"), "Phone" = c("10","219"))
+y <- data.frame("Address_line1" = c("123","123","543"), 
+                "City" = c("Dallas","Paris","New York" ), "Phone" = c("235","10","810"))
+
+x
+y
+
+z <- data.frame()
+
+for (i in seq_len(nrow(x))) {
+  for (j in seq_len(nrow(y))) {
+    if (x[i,1] == y[j,1] & x[i,3] <= y[j,3]) { 
+      z2 <- data.frame(
+        "num" = x[i,1],
+        "city" = y[j,2]
+      )
+      z <- rbind.data.frame(z, z2)
+      print("Yes")
+    } else {
+      print("NOPE")
+    }
+  }
+}
+
+z
+
+
+
+###### IT'S GO TIME
+
+
+ERV_result <- data.frame()
+for (i in 1:nrow(rptmsk_DMR)) {
+  for (j in 1:nrow(rptmsk_ordered)) {
+    if (rptmsk_DMR[i,2] == rptmsk_ordered[j,6] & rptmsk_DMR[i,3] >= rptmsk_ordered[j,7] & rptmsk_DMR[i,4] <= rptmsk_ordered[j,8]) {
+      ERV_rslt_hit <- data.frame(
+        "chr" = rptmsk_DMR[i,2],
+        "start" = rptmsk_DMR[i,3],
+        "end" = rptmsk_DMR[i,4],
+        "erv" = rptmsk_ordered$repName[j,11])
+      ERV_result <- rbind.data.frame(ERV_result, ERV_rslt_hit)
+      print("Hooray")
+      }
+  }
+}
