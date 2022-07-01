@@ -457,7 +457,7 @@ for (i in 1:nrow(rptmsk_DMR)) {
         "chr" = rptmsk_DMR[i,2],
         "start" = rptmsk_DMR[i,3],
         "end" = rptmsk_DMR[i,4],
-        "erv" = rptmsk_ordered$repName[j,11])
+        "erv" = rptmsk_ordered[j,11])
       ERV_result <- rbind.data.frame(ERV_result, ERV_rslt_hit)
       print("Hooray")
       }
