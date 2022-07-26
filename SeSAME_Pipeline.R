@@ -1,5 +1,6 @@
 getwd()
 setwd("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/")
+setwd("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/")
 # Clean up the environment and remove all the sample object files
 rm(list = ls())
 # make sure you are using the most recent version of R
@@ -254,14 +255,14 @@ test_result_pretty <- test_result_pretty %>%
       Est_treatmentBPS_100uM < 0 ~ "Hypo",
       TRUE ~ "Unchanged"),
     #Zero = case_when(
-     # Est_treatmentBPS_100uM < 0.01 & Est_treatmentBPS_100uM > 0.01 ~ "zero",
-      #TRUE ~ "Changed")
-    )
+    # Est_treatmentBPS_100uM < 0.01 & Est_treatmentBPS_100uM > 0.01 ~ "zero",
+    #TRUE ~ "Changed")
+  )
 
 test_result_pretty
 ###### Side note. Quick way to find out how many of the probes are either hyper or hypo methylated in treated samples compared to controls.
 test_result_pretty %>% 
-  count(Zero)
+  count(Methylation)
 # Now with significance added for significant changes specific changes 
 test_result_pretty %>%
   count(Methylation, Significance)
@@ -313,6 +314,43 @@ ggplot(test_result_pretty, aes(Est_treatmentBPS_100uM, -log10(Pval_treatmentBPS_
   geom_label_repel(data = top_probes,
                    mapping = aes(Est_treatmentBPS_100uM, -log(Pval_treatmentBPS_100uM,10), label = Est_Probe_ID),
                    size = 2, max.overlaps = 40)
+
+# Dr McCarrey wanted me to write in a section where I test the package and generate some false datasets that have no significant differences between the groups to see what that plot would look like so here is that.
+rm(betas_prep_scramble)
+betas_prep
+betas_prep_scramble <- betas_prep[1:500,]
+betas_prep_scramble[1:250,] <- runif(12, min=0.85, max=1)
+betas_prep_scramble[251:500,] <- runif(12, min=0.25, max=0.31)
+betas_prep_scramble
+se_scramble <- SummarizedExperiment(assays = betas_prep_scramble, colData = df)
+names(assays(se_scramble)) <- c("betas")
+cd = as.data.frame(colData(se_scramble)); rownames(cd) = NULL
+se_ok_scramble = (checkLevels(assay(se_scramble), colData(se_scramble)$treatment))
+sum(se_ok_scramble)                      # the number of CpGs that passes
+se_scramble = se_scramble[se_ok_scramble,]
+colData(se_scramble)$treatment <- relevel(factor(colData(se_scramble)$treatment), "EtOH")
+smry_scramble = DML(se_scramble, ~treatment, mc.cores = BiocParallel::SnowParam(8))
+test_result_scramble = summaryExtractTest(smry_scramble)
+test_result_scramble
+test_result_scramble <- test_result_scramble %>%
+  mutate(
+    Significance = case_when(
+      FPval_treatment <= 0.05 & FPval_treatment > 0.01 ~ "FDR 0.05",
+      FPval_treatment <= 0.01 & FPval_treatment > 0.001 ~ "FDR 0.01",
+      FPval_treatment <= 0.001 ~ "FDR 0.001",
+      TRUE ~ "Unchanged"),
+    Methylation = case_when(
+      Est_treatmentBPS_100uM > 0 ~ "Hyper",
+      Est_treatmentBPS_100uM < 0 ~ "Hypo",
+      TRUE ~ "Unchanged")
+  )
+ggplot(test_result_scramble, aes(Est_treatmentBPS_100uM, -log10(Pval_treatmentBPS_100uM))) +
+  geom_point(aes(color = Significance), size = 2/5) +
+  scale_color_viridis_d() +
+  guides(colour = guide_legend(override.aes = list(size=1.5))) +
+  xlim(-0.25, 0.2) +
+  ylim(0, 6)
+
 
 #Okay now that you have the 10 most significant hyper and hypo methylated probes you can visualize them on the genome using this function
 
@@ -389,7 +427,8 @@ treatment_specific_100uM <- test_result %>% dplyr::filter(Pval_treatmentBPS_100u
 # Let's see if there an enrichment of probes in the stage_specific differential methylated loci regions within one of the prob groups
 query <- rownames(treatment_specific_100uM)
 query
-results_treatment_specific <- testEnrichment(query)
+test_result
+results_treatment_specific <- testEnrichment(query, "chromHMM", platform = "MM285")
 KYCG_plotEnrichAll(results_treatment_specific)
 # Oh this is interesting looks like there are a number of groups from either the design group or the chromHMM group that we should look more into.
 # Before that let's rank the enrichment between groups.
@@ -400,6 +439,17 @@ treatment_specific_100uM_beta <- test_result %>% dplyr::filter(Pval_treatmentBPS
 treatment_specific_100uM$probe <- rownames(treatment_specific_100uM)
 treatment_specific_100uM_beta$probe <- rownames(treatment_specific_100uM_beta)
 treatment_specific_100uM <- merge(x = treatment_specific_100uM, y = treatment_specific_100uM_beta, by = "probe", all = TRUE)
+treatment_specific_100uM_FPval <- test_result %>% dplyr::filter(Pval_treatmentBPS_100uM < 0.05) %>% select(FPval_treatment)
+treatment_specific_100uM_FPval$probe <- rownames(treatment_specific_100uM_FPval)
+treatment_specific_100uM <- merge(x = treatment_specific_100uM, y = treatment_specific_100uM_FPval, by = "probe", all = TRUE)
+treatment_specific_100uM
+treatment_specific_100uM <- treatment_specific_100uM %>%
+  mutate(
+    Significance = case_when(
+      FPval_treatment <= 0.05 & FPval_treatment > 0.01 ~ "FDR 0.05",
+      FPval_treatment <= 0.01 & FPval_treatment > 0.001 ~ "FDR 0.01",
+      FPval_treatment <= 0.001 ~ "FDR 0.001",
+      TRUE ~ "Unchanged"))
 
 anno_design <- KYCG_annoProbes(query, "designGroup", silent = TRUE)
 anno_design <- as.data.frame(anno_design)
@@ -438,6 +488,9 @@ length(treatment_specific_100uM_final$Name)
 print(unique(treatment_specific_100uM_final$Annotation.x))
 print(unique(treatment_specific_100uM_final$Annotation.y))
 
+Enh_design <- treatment_specific_100uM_final %>%
+  filter(Annotation.x == "Enhancer")
+
 Enh <- treatment_specific_100uM_final %>%
   filter(Annotation.y == "Enh")
 EnhPois <- treatment_specific_100uM_final %>%
@@ -447,6 +500,16 @@ Enh_Joined
 Gene_Enh_Joined <- print(unique(Enh_Joined$Gene))
 write.table(Gene_Enh_Joined, file = "Gene_Enh_Joined.txt", sep = "\t",
             row.names = FALSE)
+print(unique(treatment_specific_100uM_final$Annotation.x))
+
+treatment_specific_100uM_final
+FDR_0.05 <- treatment_specific_100uM_final %>%
+  filter(Significance == "FDR 0.05")
+FDR_0.01 <- treatment_specific_100uM_final %>%
+  filter(Significance == "FDR 0.01")
+FDR_0.001 <- treatment_specific_100uM_final %>%
+  filter(Significance == "FDR 0.001")
+
 # Okay now let's start building some chromosome maps so we can display all the sites where there are changes. 
 
 install.packages("RIdeogram")
@@ -469,6 +532,15 @@ probes <- data.frame(
   Start = as.integer(treatment_specific_100uM_final$MAPINFO),
   End = as.integer(treatment_specific_100uM_final$MAPINFO) + 1,
   Value = treatment_specific_100uM_final$Est_treatmentBPS_100uM
+)
+
+
+probes_Enh_design <- data.frame(
+  Name = Enh_design$Name,
+  Chr = Enh_design$CHR,
+  Start = as.integer(Enh_design$MAPINFO),
+  End = as.integer(Enh_design$MAPINFO) + 1,
+  Value = Enh_design$Est_treatmentBPS_100uM
 )
 
 probes_Enh <- data.frame(
@@ -512,9 +584,37 @@ ideogram(karyotype = mouse_karyotype, overlaid = probes_no_name_Enh, colorset1 =
 convertSVG("chromosome.svg", device = "png")
 svg2pdf("chromosome.svg")
 
+probes_Enh_design <- probes_Enh_design %>% distinct()
+probes_no_name_Enh_design <- select(probes_Enh_design, -c("Name"))
+probes_no_name_Enh_design <- probes_no_name_Enh_design %>% arrange(probes_no_name_Enh_design$End, by_group = TRUE)
+print(unique(probes_no_name_Enh_design$Chr))
+probes_no_name_Enh_design <- probes_no_name_Enh_design[probes_no_name_Enh_design$Chr %in% c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "X", "Y"),]
+length(probes_no_name_Enh_design$Chr)
 
-ideogram(karyotype = human_karyotype, label = Random_RNAs_500, label_type = "marker")
+ideogram(karyotype = mouse_karyotype, overlaid = probes_no_name_Enh_design, colorset1 = c("#f5ae0a"))
 convertSVG("chromosome.svg", device = "png")
+svg2pdf("chromosome.svg")
+
+
+
+FDR_0.001 <- data.frame(
+  Name = FDR_0.001$Name,
+  Chr = FDR_0.001$CHR,
+  Start = as.integer(FDR_0.001$MAPINFO),
+  End = as.integer(FDR_0.001$MAPINFO) + 1,
+  Value = FDR_0.001$Est_treatmentBPS_100uM
+)
+FDR_0.001 <- FDR_0.001 %>% distinct()
+FDR_0.001 <- select(FDR_0.001, -c("Name"))
+probes_no_name_FDR <- FDR_0.001 %>% arrange(FDR_0.001$End, by_group = TRUE)
+print(unique(probes_no_name_FDR$Chr))
+probes_no_name_FDR <- probes_no_name_FDR[probes_no_name_FDR$Chr %in% c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "X", "Y"),]
+length(probes_no_name_FDR$Chr)
+
+ideogram(karyotype = mouse_karyotype, overlaid = probes_no_name_FDR, colorset1 = c("#25075c"))
+convertSVG("chromosome.svg", device = "png")
+svg2pdf("chromosome.svg")
+
 # Very interesting this looks like there enrichment from enhancers, enhancer and enhancer poised chromatin, gene body, H3K36me3. 
 # Let's try to pull out the designGroup and chromHMM data sets and try to annotate them to find out some more information about them.
 results_treatment_specific_designGroup <- testEnrichment(query, "chromHMM", platform = "MM285")
@@ -737,8 +837,8 @@ wgbs.annotateDMRs <- function (dmrFile, gzippedCgiFile, gzippedGeneFile, gzipped
 }
 
 /mnt/c/
-
-write.csv(New_DMR, "C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/DMR.csv", row.names = FALSE)
+  
+  write.csv(New_DMR, "C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/DMR.csv", row.names = FALSE)
 DMR_link <- c("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/DMR.csv.gz")
 cgi_link <- c("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/cpi-GRCm38.csv.gz")
 anno_link <- c("C:/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/gencode.vM30.annotation.gtf.gz")
@@ -785,13 +885,13 @@ New_DMR <- select(New_DMR, -c("Seg_Pval", "Probe_ID", "Estimate", "Std. Error", 
 New_DMR
 library(plyr)
 New_DMR <- ddply(New_DMR, .(Seg_ID), summarize,
-      chr = paste(unique(Seg_Chrm)),
-      start = paste(unique(Seg_Start)),
-      end = paste(unique(Seg_End)),
-      num_cpg = length(Seg_Chrm),
-      diff = paste(unique(Seg_Est)),
-      pValue = paste(unique(Seg_Pval_adj)),
-      Tool = c("Infinium"))
+                 chr = paste(unique(Seg_Chrm)),
+                 start = paste(unique(Seg_Start)),
+                 end = paste(unique(Seg_End)),
+                 num_cpg = length(Seg_Chrm),
+                 diff = paste(unique(Seg_Est)),
+                 pValue = paste(unique(Seg_Pval_adj)),
+                 Tool = c("Infinium"))
 New_DMR <- select(New_DMR, -Seg_ID)
 
 
@@ -821,7 +921,7 @@ for (i in 1:nrow(rptmsk_DMR)) {
       ERV_result <- rbind.data.frame(ERV_result, ERV_rslt_hit)
       print("Hooray")
     }
-    }}
+  }}
 
 ERV_result
 
@@ -847,3 +947,53 @@ print(unique(probes_dmr$Chr))
 ideogram(karyotype = mouse_karyotype, label = probes_dmr, label_type = "marker")
 convertSVG("chromosome.svg", device = "png")
 svg2pdf("chromosome.svg")
+
+# Motif analysis of DMRs
+BiocManager::install("memes")
+library(memes)
+library(universalmotif)
+library(dplyr)
+suppressPackageStartupMessages(library(GenomicRanges))
+BiocManager::install("plyranges")
+suppressPackageStartupMessages(library(plyranges))
+DMR
+DMR_table
+DMR_table <- DMR_table %>%
+  mutate(
+    Annotation = case_when(
+      promoter_overlap == TRUE & cgi_overlap == TRUE ~ "CpG_Island_Promoter",
+      promoter_overlap == TRUE & cgi_overlap == FALSE ~ "Promoter",
+      gene_overlap == TRUE ~ "Gene_Body",
+      promoter_overlap == FALSE & cgi_overlap == FALSE & gene_overlap == FALSE ~ "Other"
+    )
+  )
+
+gr <- GRanges(
+  seqnames = DMR_table$chr,
+  ranges = IRanges(as.numeric(DMR_table$start), end = as.numeric(New_DMR$end)),
+  strand = Rle(strand(c( "*")), c(41)),
+  annotation = DMR_table$Annotation)
+gr
+
+# NOTE: beware system-specific differences. As of MEME v5, dreme will compile using the default python installation on a system (either python2.7 or python3). The random number generator changed between python2.7 and python3, so results will not be reproducible between systems using python2.7 vs 3 even if setting the same random seed.
+# One way to overcome this is to manually shuffle the sequences within R. This can be done easily using universalmotif::shuffle_sequences(). Set k = 2 to preserve dinucleotide frequency (similar to dreme’s built-in shuffle), and set rng.seed to any number to create a reproducible shuffle. The output of this function can be used directly as the control sequences.
+# Create random sequences to use for this example
+seq <- create_sequences(rng.seed = 100)
+# Shuffle sequences preserving dinucleotide frequency
+shuffle <- shuffle_sequences(seq, k = 2, rng.seed = 100)
+
+BiocManager::install("BSgenome.Mmusculus.UCSC.mm39")
+mm.genome <- BSgenome.Mmusculus.UCSC.mm39::BSgenome.Mmusculus.UCSC.mm39
+
+by_anno <- gr %>% 
+  anchor_center() %>% 
+  mutate(width = 100) %>% 
+  split(mcols(.)$annotation)
+
+by_anno
+
+seq_by_annotation <- by_anno %>% 
+  get_sequence(mm.genome)
+
+names(seq_by_annotation)
+runDreme(seq_by_annotation, control = "shuffle")
