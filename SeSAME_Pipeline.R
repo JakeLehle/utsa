@@ -949,6 +949,7 @@ convertSVG("chromosome.svg", device = "png")
 svg2pdf("chromosome.svg")
 
 # Motif analysis of DMRs
+# This has to be done on a LINUX vitrual machine 
 BiocManager::install("memes")
 library(memes)
 library(universalmotif)
@@ -985,15 +986,44 @@ shuffle <- shuffle_sequences(seq, k = 2, rng.seed = 100)
 BiocManager::install("BSgenome.Mmusculus.UCSC.mm39")
 mm.genome <- BSgenome.Mmusculus.UCSC.mm39::BSgenome.Mmusculus.UCSC.mm39
 
-by_anno <- gr %>% 
-  anchor_center() %>% 
-  mutate(width = 100) %>% 
-  split(mcols(.)$annotation)
+#by_anno <- gr %>% 
+#  anchor_center() %>% 
+#  mutate(width = 100) %>% 
+#  split(mcols(.)$annotation)
 
-by_anno
+#seq_by_annotation <- by_anno %>% 
+#  get_sequence(mm.genome)
 
-seq_by_annotation <- by_anno %>% 
+CRE_table <- fread("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/enhancer.csv")
+CRE_table
+#length(CRE_table$annotation)
+#CRE_table1 <- CRE_table %>% filter(annotation == "Gene_Body")
+#CRE_table2 <- CRE_table %>% filter(annotation == "Other")
+#CRE_table <- rbind(CRE_table1, CRE_table2)
+gr <- GRanges(
+  seqnames = CRE_table$chrom,
+  ranges = IRanges(as.numeric(CRE_table$start), end = as.numeric(CRE_table$start + CRE_table$len)),
+  strand = Rle(strand(c( "*")), c(512)),
+  annotation = CRE_table$annotation)
+gr
+
+seq_by_annotation <- gr %>%
   get_sequence(mm.genome)
 
-names(seq_by_annotation)
-runDreme(seq_by_annotation, control = "shuffle")
+dreme_out <- runDreme(seq_by_annotation, control = "shuffle")
+
+class(dreme_out)
+dreme_out %>% 
+  to_list() %>% 
+  view_motifs()
+
+# Let's compare our cis-regulatory element motifs to known transcripton factors found on the JASPAR database.  
+
+JASPAR <- read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme")
+options(meme_db = read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme"))
+tomtomout <- runTomTom(dreme_out, database = JASPAR)
+names(tomtomout)
+tomtomout$best_match_qval
+tomtomout
+view_motifs(tomtomout$best_match_motif)
+tomtomout$tomtom[[1]] %>% head(6)
