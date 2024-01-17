@@ -271,63 +271,98 @@ adata.obs['louvain_r0.75'].value_counts()
 sc.pl.umap(adata, color=['louvain_r0.75', 'louvain_r1'], palette=sc.pl.palettes.vega_20) #module 'scanpy.plotting.palettes' has no attribute 'default_64'
 sc.pl.umap(adata, color=['rep', 'n_counts'])
 sc.pl.umap(adata, color=['log_counts', 'mt_frac'])
-#Calculate marker genes
+#Calculate marker genes this is a very important section the key added will be a dictionary that you can use to find raw relative gene expression values and plot figures with. The keys are stored in the adata.uns object
 sc.tl.rank_genes_groups(adata, groupby='louvain_r0.75', key_added='rank_genes_r0.75')
-#Plot marker genes
-sc.pl.rank_genes_groups(adata, key='rank_genes_r0.75', groups=['0','1','2','3', '4'], fontsize=12)
+sc.tl.rank_genes_groups(adata, groupby='louvain_r0.75', n_genes=adata.raw.shape[1])
+
+type(adata.uns['rank_genes_r0.75'])
+
+#Plot marker genes plotting
+sc.pl.rank_genes_groups(adata, key='rank_genes_r0.75', groups=['4','10'], fontsize=12)
 sc.pl.rank_genes_groups(adata, key='rank_genes_r0.75', groups=['5', '6', '7', '8', '9', '10'], fontsize=12)
 
 #Known marker genes:
-
 cell_death = pd.read_csv('/work/sdz852/goldenboy/SC/Cell_Death.csv')
 
 dna_repair = pd.read_csv('/work/sdz852/goldenboy/SC/DNA_Repair.csv')
 dna_repair
 
+#Here I will make a new dictionary with known marker genes specifically for all the DNA and Cell death genes that came from Danny's project
 marker_genes = dict()
 
-#marker_genes['Cell Death'] = cell_death['Final list cell death'].tolist()
+marker_genes['Cell Death'] = cell_death['Final list cell death'].tolist()
 marker_genes['DNA Repair'] = dna_repair['Final list cell repair'].tolist()
 
+marker_genes['DNA Repair']
 
-
-
-
-
-#marker_genes['Stem'] = ['Lgr5', 'Ascl2', 'Slc12a2', 'Axin2', 'Olfm4', 'Gkn3']
-#marker_genes['Enterocyte (Proximal)'] = ['Gsta1','Rbp2','Adh6a','Apoa4','Reg3a','Creb3l3','Cyp3a13','Cyp2d26','Ms4a10','Ace','Aldh1a1','Rdh7','H2-Q2', 'Hsd17b6','Gstm3','Gda','Apoc3','Gpd1','Fabp1','Slc5a1','Mme','Cox7a1','Gsta4','Lct','Khk','Mttp','Xdh','Sult1b1', 'Treh','Lpgat1','Dhrs1','Cyp2c66','Ephx2','Cyp2c65','Cyp3a25','Slc2a2','Ugdh','Gstm6','Retsat','Ppap2a','Acsl5', 'Cyb5r3','Cyb5b','Ckmt1','Aldob','Ckb','Scp2','Prap1']
+#To find which group has the highest expression of marker gene expression I can quickly find the overlap between the ranked expression and the marker genes
 cell_annotation = sc.tl.marker_gene_overlap(adata, marker_genes, key='rank_genes_r0.75')
 cell_annotation
-
+# This looks good but let's normalize everything and display it as a heatmap
 cell_annotation_norm = sc.tl.marker_gene_overlap(adata, marker_genes, key='rank_genes_r0.75', normalize='reference')
 sb.heatmap(cell_annotation_norm, cbar=False, annot=True)
+#Awesome it looks likt there is one distinct cluster that has higher median expression of some genes in the DNA marker dict we make some additional plots of this with dot plot
+
 #Define a nice colour map for gene expression
 colors2 = plt.cm.Reds(np.linspace(0, 1, 128))
 colors3 = plt.cm.Greys_r(np.linspace(0.7,0.8,20))
 colorsComb = np.vstack([colors3, colors2])
 mymap = colors.LinearSegmentedColormap.from_list('my_colormap', colorsComb)
-#Defa24 #Tff3
+
+# How to do individual feature maps for #Defa24 #Tff3
 sc.pl.umap(adata, color='Defa24', use_raw=False, color_map=mymap)
 sc.pl.umap(adata, color='Tff3', use_raw=False, color_map=mymap)
+
+
+
 # Check expression of enterocyte markers
-#Collate all enterocyte markers and get the gene IDs in the data set
+#Collate all known markers and get the gene IDs in the data set
 ids_cd = np.in1d(adata.var_names, marker_genes['Cell Death'])
 ids_dr = np.in1d(adata.var_names, marker_genes['DNA Repair'])
 ids_cd
 ids_cddr = np.logical_or(ids_cd, ids_dr)
 
-#Calculate the mean expression of enterocyte markers
+#Calculate the mean expression of known markers for each cell
 adata.obs['Cell_Death_and_DNA_Repair_marker_expr'] = adata.X[:,ids_cddr].mean(1)
 adata.obs['DNA_Repair_marker_expr'] = adata.X[:,ids_dr].mean(1)
-
-#Plot enterocyte expression
+adata.obs['DNA_Repair_marker_expr']
+#Plot expression
 sc.pl.violin(adata, 'Cell_Death_and_DNA_Repair_marker_expr', groupby='louvain_r0.75', inner='quartile')
 sc.pl.violin(adata, 'DNA_Repair_marker_expr', groupby='louvain_r0.75', inner="quart")
-sc.pl.umap(adata, color='Cell_Death_and_DNA_Repair_marker_expr', color_map=mymap)
+sc.pl.umap(adata, color='DNA_Repair_marker_expr', color_map=mymap)
 
+#However the previous section only shows the mean value all expression of all genes in the marker gene set what about expression of indiviudal genes.
+#We can look at that using dotplots
+#First I will make a var_names object to store the marker genes
+var_names = {'DNA Repair': marker_genes['DNA Repair']}
+var_names
+sc.pl.rank_genes_groups_dotplot(adata, var_names=var_names, standard_scale='var')
 
-sc.pl.dotplot(adata, marker_genes, 'louvain_r0.95', dendrogram=True)
-
-dna_repair_missing = ['0610007p08rik', '1110054o05rik', '5730590g19rik', 'Apitd1', 'Bre', 'C77370', 'Fam175a', 'H2afx', 'Mum1', 'Pold4', 'Rad51l1', 'Supt16h']
-
+# Another was to do this is with the dotplot object functions 
+sc.pl.dotplot(adata, marker_genes['DNA Repair'], 'louvain_r0.75', dendrogram=True, standard_scale='var')
+dna_repair_missing = ['0610007p08rik', '1110054o05rik', '1810011o10rik', '5730590g19rik', 'Apitd1', 'Bre', 'C77370', 'Ctgf', 'Cyr61', 'Fam175a', 'Fam176a', 'Fgf4', 'Fndc1', 'H2afx', 'H47', 'Lrdd', 'Mkl1', 'Mmd', 'Mum1', 'Phf17', 'Pkm2', 'Pold4', 'Rad51l1', 'Slc9a3r1', 'Supt16h', 'Tcfap4', 'Tdgf1', 'Tmem173', 'Wdr92']
 dna_repair = dna_repair[-dna_repair['Final list cell repair'].isin(dna_repair_missing)]
+
+
+sc.pl.DotPlot(adata, marker_genes['DNA Repair'], groupby='louvain_r0.75', standard_scale='var').show()
+dp = sc.pl.dotplot(adata, marker_genes['DNA Repair'], 'louvain_r0.75', dendrogram=True, standard_scale='var', return_fig=True)
+dp.add_totals().show()
+list(dp)
+print(dp)
+axes_dict = dp.get_axes()
+print(axes_dict)
+
+sc.pl.dotplot(adata, marker_genes['DNA Repair'], 'louvain_r0.75', dendrogram=False, standard_scale='var')
+
+
+
+dna_repair_missing = ['1810011o10rik', 'Bre', 'Ctgf', 'Cyr61', 'Fam176a', 'Fgf4', 'Fndc1', 'H47', 'Lrdd', 'Mkl1', 'Mmd', 'Phf17', 'Pkm2', 'Slc9a3r1', 'Tcfap4', 'Tdgf1', 'Tmem173', 'Wdr92']
+
+
+
+
+
+marker_matches = sc.tl.marker_gene_overlap(adata, marker_genes['DNA Repair'])
+
+
+
