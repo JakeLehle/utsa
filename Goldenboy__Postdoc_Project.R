@@ -666,5 +666,65 @@ tomtomout$best_match_altname
 tomtomout$best_match_pval
 tomtomout$best_match_qval
 view_motifs(tomtomout$best_match_motif)
-tomtomout
+tomtomout$best_match_altname
+tomtomout[36,]
 
+################################################################################
+# Okay based on the Single cell ananlysis of E18.5 We found there was a population of cells that had an elevated expression of a subset of DNA repair genes so I'm going to put that together and check them for motifs and pathways
+DNA_Repair
+
+DNA_repair_sub_E18.5 <- c('Parp2', 'Bard1', 'Brca1', 'Brca2', 'Chek1', 'Gtf2h4', 'Msh2', 'Nthl1', 'Pola1', 'Rad1', 'Rad50', 'Rfc1', 'Usp10', 'Parg', 'Chaf1a', 'Sfpq', 'Ercc8', 'Dtl', 'Fancm', 'Fanci', 'Usp1', 'Fancl', 'Atm', 'Huwe1', 'Topbp1', 'Smc1a', 'Atrx')
+
+gr_SSC_barcode_genes <- Mm_genes[unlist(Mm_genes$SYMBOL) %in% DNA_repair_sub_E18.5]
+
+gr_SSC_pormoters <- promoters(gr_SSC_barcode_genes, upstream = 1000, downstream = 1000)
+
+
+gr_SSC_pormoter_seq <- gr_SSC_pormoters %>%
+  get_sequence(mm.genome)
+
+gr_SSC_pormoter_seq
+
+
+dreme_out <- runDreme(gr_SSC_pormoter_seq, control = "shuffle", dna = TRUE, sec = 3600)
+dreme_out <- runDreme(gr_SSC_pormoter_seq, control = "shuffle", dna = TRUE, nmotifs = 20)
+dreme_out <- runDreme(gr_SSC_pormoter_seq, control = "shuffle", dna = TRUE)
+dreme_out
+dreme_out %>% 
+  to_list() %>% 
+  view_motifs()
+
+
+
+
+
+JASPAR <- read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme")
+options(meme_db = read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme"))
+
+
+
+tomtomout <- runTomTom(dreme_out, database = JASPAR)
+names(tomtomout)
+tomtomout$best_match_altname
+tomtomout$best_match_pval
+tomtomout$best_match_qval
+tomtomout
+view_motifs(tomtomout$best_match_motif)
+tomtomout$best_match_altname
+tomtomout[36,]
+
+enriched <- enrichr(unique(DNA_Repair$Final.list.cell.repair), dbs)
+
+
+tmp <- enriched[['GO_Biological_Process_2023']]
+tmp$Genes
+write.csv(as.data.frame(decideTests(tmp)), 
+          file=".csv")
+
+#Something to try tomorrow
+
+library(biomaRt)
+ensembl = useMart("ensembl",dataset="hsapiens_gene_ensembl") #uses human ensembl annotations
+#gets gene symbol, transcript_id and go_id for all genes annotated with GO:0007507
+gene.data <- getBM(attributes=c('hgnc_symbol', 'ensembl_transcript_id', 'go_id'),
+                   filters = 'go_id', values = 'GO:0007507', mart = ensembl)
