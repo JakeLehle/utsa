@@ -1,0 +1,32 @@
+name: sc
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base
+  - bioconductor-scran
+  - bioconductor-slingshot
+  - r-gam
+  - r-ggplot2
+  - r-rcolorbrewer
+  - bioconductor-clusterexperiment
+  - bioconductor-mast
+  - jupyter_core
+  - scanpy
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib-base
+  - seaborn
+  - r-gprofiler
+  - rpy2
+  - r-logging
+  - anndata2ri
+  - python-igraph
+  - louvain
+  - leidenalg
+  - spyder
+  - adjusttext
+  - bbknn
+  - r-enrichr
+  - r-biomartr
