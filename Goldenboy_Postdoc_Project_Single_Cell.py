@@ -357,4 +357,177 @@ robjects.globalenv['DNA_Repair'] = marker_genes['DNA Repair']
 robjects.globalenv['DNA_Repair']
 
 enriched = robjects.r(f'enrichr(DNA_Repair, go_db)')
+DNA_Repair_Pathways = enriched['GO_Biological_Process_2023'][enriched['GO_Biological_Process_2023']['Adjusted.P.value'] < 0.05]
+DNA_Repair_Pathways['Term']
+
+biomaRt = importr("biomaRt")
+ensembl = useMart("ensembl",dataset="hsapiens_gene_ensembl") #uses human ensembl annotations
+#gets gene symbol, transcript_id and go_id for all genes annotated with GO:0007507
+# This is still R code for the rest of this cell need to convert it over to python
+gene.data <- getBM(attributes=c('hgnc_symbol', 'ensembl_transcript_id', 'go_id'),
+                   filters = 'go_id', values = 'GO:0007507', mart = ensembl)
+
+plotEnrich(enriched[[1]], #showTerms = 15, 
+           numChar = 90, y = "Count", orderBy = "P.value") +
+  ggtitle("DNA Repair Pathway from E18.5 Single Cell Data") +
+  theme(
+    axis.text = element_text(size=12, face="bold"),
+    plot.title = element_text(size=35, face="bold", hjust = 1),
+    axis.text.y = element_text(size=18, face="bold"),
+    axis.title.x = element_text(size=12, face="bold"),
+    axis.title.y = element_text(size=12, face="bold"),
+    legend.title = element_text(size=12, face="bold")
+  )
+#%% 
+# Okay this is one way of pulling out specifically different pathways but this is probably wrong to do or at least biased.
+# Here is an alternative way to pull out marker genes from a single cluster and run GO on just those genes to see if DNA repair is one of the pathways that pops out and then we can take it from there
+    #find markers
+    results = adata_pp.uns['rank_genes_leiden']
+    out = np.array([[0,0,0,0,0]])
+    for group in results['names'].dtype.names:
+        out = np.vstack((out, np.vstack((results['names'][group],
+                                         results['scores'][group],
+                                         results['pvals_adj'][group],
+                                         results['logfoldchanges'][group],
+                                         np.array([group] * len(results['names'][group])).astype('object'))).T))
+    markers = pd.DataFrame(out[1:], columns = ['Gene', 'scores', 'pval_adj', 'lfc', 'cluster'])
+    adata_pp.uns['markers'] = markers #save marker df to uns
+
+
+adata_pp.uns['markers']['pval_adj']
+adata_pp.uns['rank_genes_leiden']['params']['groupby']
+gb_markers = adata_pp.uns['markers'] 
+gb_markers.cluster
+#This is the DEG object filtered for pval < 0.05 for ALL clusters
+gb_markers = gb_markers[(gb_markers.pval_adj < 0.05)]
+# Now I'm just going to pull out just cluster 10
+gb_markers_10 = gb_markers[(gb_markers.cluster == '10')]
+gb_markers_10
+#%%
+#first need to make background gene set
+# Go to this url
+#https://www.ncbi.nlm.nih.gov/gene
+#Paste this into the search bar and this will output a big table with all the gene information you need 
+#"10090"[Taxonomy ID] AND alive[property] AND genetype protein coding[Properties]
+#human is 9606
+#You just need to send this to a file so look for the small dropdown that says "send to:" and then select
+#send to file
+
+#%%
+!mv /work/sdz852/goldenboy/SC/fastq/E18.5/gene_result.txt .
+!python /home/sdz852/.conda/envs/sc_2/bin/ncbi_gene_results_to_python.py -o genes_ncbi_mus_musculus_proteincoding.py gene_result.txt
+#%%
+from genes_ncbi_mus_musculus_proteincoding import GENEID2NT as GeneID2nt_mus
+from goatools.base import download_go_basic_obo
+from goatools.base import download_ncbi_associations
+from goatools.obo_parser import GODag
+from goatools.anno.genetogo_reader import Gene2GoReader
+from goatools.goea.go_enrichment_ns import GOEnrichmentStudyNS
+#%%
+#run one time to initialize
+obo_fname = download_go_basic_obo()
+fin_gene2go = download_ncbi_associations()
+obodag = GODag("go-basic.obo")
+#%%
+#run one time to initialize
+mapper = {}
+
+for key in GeneID2nt_mus:
+    mapper[GeneID2nt_mus[key].Symbol] = GeneID2nt_mus[key].GeneID
+    
+inv_map = {v: k for k, v in mapper.items()}
+#%%
+#run one time to initialize
+
+# Read NCBI's gene2go. Store annotations in a list of namedtuples
+objanno = Gene2GoReader(fin_gene2go, taxids=[10090])
+# Get namespace2association where:
+#    namespace is:
+#        BP: biological_process               
+#        MF: molecular_function
+#        CC: cellular_component
+#    assocation is a dict:
+#        key: NCBI GeneID
+#        value: A set of GO IDs associated with that gene
+ns2assoc = objanno.get_ns2assc()
+#%%
+#run one time to initialize
+goeaobj = GOEnrichmentStudyNS(
+        GeneID2nt_mus.keys(), # List of mouse protein-coding genes
+        ns2assoc, # geneid/GO associations
+        obodag, # Ontologies
+        propagate_counts = False,
+        alpha = 0.05, # default significance cut-off
+        methods = ['fdr_bh']) # defult multipletest correction method
+#%%
+#run one time to initialize
+GO_items = []
+
+temp = goeaobj.ns2objgoea['BP'].assoc
+for item in temp:
+    GO_items += temp[item]
+    
+
+temp = goeaobj.ns2objgoea['CC'].assoc
+for item in temp:
+    GO_items += temp[item]
+    
+
+temp = goeaobj.ns2objgoea['MF'].assoc
+for item in temp:
+    GO_items += temp[item]
+#pass list of gene symbols
+def go_it(test_genes):
+    print(f'input genes: {len(test_genes)}')
+    
+    mapped_genes = []
+    for gene in test_genes:
+        try:
+            mapped_genes.append(mapper[gene])
+        except:
+            pass
+    print(f'mapped genes: {len(mapped_genes)}')
+    
+    goea_results_all = goeaobj.run_study(mapped_genes)
+    goea_results_sig = [r for r in goea_results_all if r.p_fdr_bh < 0.05]
+    GO = pd.DataFrame(list(map(lambda x: [x.GO, x.goterm.name, x.goterm.namespace, x.p_uncorrected, x.p_fdr_bh,\
+                   x.ratio_in_study[0], x.ratio_in_study[1], GO_items.count(x.GO), list(map(lambda y: inv_map[y], x.study_items)),\
+                   ], goea_results_sig)), columns = ['GO', 'term', 'class', 'p', 'p_corr', 'n_genes',\
+                                                    'n_study', 'n_go', 'study_genes'])
+
+    GO = GO[GO.n_genes > 1]
+    return GO
+#%%
+df = go_it(gb_markers_10.Gene.values)
+df
+#%%
+df['per'] = df.n_genes/df.n_go
+df = df[0:10]
+#%%
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib import cm
+import seaborn as sns
+import textwrap
+#%%
+fig, ax = plt.subplots(figsize = (0.5, 2.75))
+
+cmap = mpl.cm.bwr_r
+norm = mpl.colors.Normalize(vmin = df.p_corr.min(), vmax = df.p_corr.max())
+
+mapper = cm.ScalarMappable(norm = norm, cmap = cm.bwr_r)
+
+cbl = mpl.colorbar.ColorbarBase(ax, cmap = cmap, norm = norm, orientation = 'vertical')
+#%%
+plt.figure(figsize = (2,4))
+
+
+
+ax = sns.barplot(data = df, x = 'per', y = 'term', palette = mapper.to_rgba(df.p_corr.values))
+
+ax.set_yticklabels([textwrap.fill(e, 22) for e in df['term']])
+
+plt.show()
+
+enriched = robjects.r(f'enrichr(DNA_Repair, go_db)')
 print(enriched['GO_Biological_Process_2023'])
