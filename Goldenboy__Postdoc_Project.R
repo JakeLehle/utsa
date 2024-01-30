@@ -696,8 +696,6 @@ dreme_out %>%
 
 
 
-
-
 JASPAR <- read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme")
 options(meme_db = read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme"))
 
@@ -724,7 +722,124 @@ write.csv(as.data.frame(decideTests(tmp)),
 #Something to try tomorrow
 
 library(biomaRt)
-ensembl = useMart("ensembl",dataset="hsapiens_gene_ensembl") #uses human ensembl annotations
-#gets gene symbol, transcript_id and go_id for all genes annotated with GO:0007507
-gene.data <- getBM(attributes=c('hgnc_symbol', 'ensembl_transcript_id', 'go_id'),
-                   filters = 'go_id', values = 'GO:0007507', mart = ensembl)
+?useEnsembl
+ensembl = useMart("ensembl",dataset="mmusculus_gene_ensembl") #uses mouse ensembl annotations
+# Use this to set up the filters on the biomart database pull you can see in the two code cunks below that I was filtering by either go terms or gene symbols you can put those toegther into 1 filter selection if you would like as well
+tmp <- listAttributes(mart = ensembl)
+tmp <- listFilters(mart = ensembl) 
+tmp$name
+tmp %>% filter(grepl('symbol', name))
+
+#gets gene symbol, transcript_id and go_id for all genes annotated with GO:0006281
+gene.data <- getBM(attributes=c('mgi_symbol', 'strand', 'chromosome_name', 'start_position', 'end_position', 'go_id'),
+                   filters = 'go', values = 'GO:0006281', mart = ensembl)
+
+
+#gene.data <- getBM(attributes=c('mgi_symbol', 'strand', 'chromosome_name', 'start_position', 'end_position', 'go_id'),
+#                   filters = c('go', 'mgi_symbol'), values = list('GO:0006281', DNA_repair_sub_E18.5), mart = ensembl)
+
+#gene.data.2 <- getBM(attributes=c('mgi_symbol', 'strand', 'chromosome_name', 'start_position', 'end_position', 'go_id'),
+#                   filters = 'mgi_symbol', values = list(DNA_repair_sub_E18.5), mart = ensembl)
+
+
+gene.data <- gene.data %>% filter('GO:0006281' == go_id)
+
+gene.data
+
+gene.data["strand"][gene.data["strand"] == "1"] <- "+"
+gene.data["strand"][gene.data["strand"] == "-1"] <- "-"
+
+unique(gene.data$mgi_symbol)
+# I don't like that this list has more than what the enrichment report indicated but I will buy it for the moment and maybe my enrichment needs to be checked
+
+#////////////////////////////////////////////////////////////////////////////////////
+
+#Motif ananlysis of all the genes in the go term
+
+gr_DNA_repair <- GRanges(
+  seqnames = paste('chr', gene.data$chromosome_name, sep = ''),
+  ranges = IRanges(gene.data$start_position, end = gene.data$end_position),
+  strand = Rle(strand(gene.data$strand)))
+
+gr_DNA_repair
+
+gr_DNA_repair_pormoters <- promoters(gr_DNA_repair, upstream = 1000, downstream = 1000)
+gr_DNA_repair_pormoters
+mm.genome <- BSgenome.Mmusculus.UCSC.mm10::BSgenome.Mmusculus.UCSC.mm10
+mm.genome
+
+library(memes)
+
+gr_DNA_repair_pormoters_seq <- gr_DNA_repair_pormoters %>%
+  get_sequence(mm.genome)
+
+gr_DNA_repair_pormoters_seq
+seq <- create_sequences(rng.seed = 100)
+# Shuffle sequences preserving dinucleotide frequency
+shuffle <- shuffle_sequences(seq, k = 2, rng.seed = 100)
+
+
+
+dreme_out <- runDreme(gr_SSC_pormoter_seq, control = "shuffle", dna = TRUE, sec = 3600)
+dreme_out <- runDreme(gr_SSC_pormoter_seq, control = "shuffle", dna = TRUE, nmotifs = 20)
+dreme_out <- runDreme(gr_DNA_repair_pormoters_seq, control = "shuffle", dna = TRUE)
+dreme_out
+dreme_out %>% 
+  to_list() %>% 
+  view_motifs()
+
+
+
+
+
+JASPAR <- read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme")
+options(meme_db = read_meme("/mnt/c/Users/jakel/Documents/UTSA/Lab/IVERR/Infinium_Array/Lehle-UnivTexas_MouseMethylation_20220627/Lehle-UnivTexas_MouseMethylation_20220627/JASPAR.meme"))
+
+
+
+tomtomout <- runTomTom(dreme_out, database = JASPAR)
+tomtomout
+names(tomtomout)
+tomtomout$best_match_altname
+tomtomout$best_match_pval
+tomtomout$best_match_qval
+view_motifs(tomtomout$best_match_motif)
+tomtomout$best_match_altname
+tomtomout[36,]
+
+
+
+
+
+
+#////////////////////////////////////////////////////////////////////////////////////////
+df_DEG_E16 <- as.data.frame(read.csv("/mnt/f/Golden_boy_project/Master_Dir/Single_cell/Files/excel/Jake/DEG_E16.csv"))
+df_DEG_E16_c4 <- df_DEG_E16 %>% filter(df_DEG_E16$cluster == 4)
+
+intersect(unique(unlist(overlap_gene_FOXC2$SYMBOL)), df_DEG_E16_c4$Gene)
+intersect(unique(overlap_promoters_FOXC2$value), df_DEG_E16_c4$Gene)
+
+
+df_DEG_E18 <- as.data.frame(read.csv("/mnt/f/Golden_boy_project/Master_Dir/Single_cell/Files/excel/Jake/DEG_E18.csv"))
+df_DEG_E18_c10 <- df_DEG_E18 %>% filter(df_DEG_E18$cluster == 10)
+df_DEG_E18_c10$Gene
+
+dbs %>% filter(grepl("Panth", libraryName))
+
+dbs <- c('GO_Biological_Process_2023', 'GO_Cellular_Component_2023', 'GO_Molecular_Function_2023', 'KEGG_2019_Mouse', 'WikiPathways_2019_Mouse', "Panther_2016")
+
+
+enriched <- enrichr(unique(df_DEG_E18_c10$Gene), dbs)
+
+tmp <- enriched[['GO_Biological_Process_2023']]
+tmp %>% filter(grepl("Repair", Term))
+
+intersect(unique(unlist(overlap_gene_FOXC2$SYMBOL)), df_DEG_E18_c10$Gene)
+intersect(unique(overlap_promoters_FOXC2$value), df_DEG_E18_c10$Gene)
+
+
+####################################################
+
+intersect(gene.data$mgi_symbol, df_DEG_E18_c10$Gene)
+intersect(gene.data$mgi_symbol, df_DEG_E16_c4$Gene)
+
