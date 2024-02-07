@@ -843,3 +843,26 @@ intersect(unique(overlap_promoters_FOXC2$value), df_DEG_E18_c10$Gene)
 intersect(gene.data$mgi_symbol, df_DEG_E18_c10$Gene)
 intersect(gene.data$mgi_symbol, df_DEG_E16_c4$Gene)
 
+########################################################
+
+BiocManager::install("KEGGREST")
+listDatabases()
+org <- keggList("organism")
+head(org)
+# We can grep out the information about the mouse species 
+org[grep('mouse', org[, 'species']), , drop = FALSE]
+
+#Using the correct name for the species we can get out all the KEGG id for each gene
+keggList('mmu')
+
+
+# To get all information about KEGG ids
+query <- keggGet(c("mmu:213056", "mmu:66495"))
+
+
+# looks like the KEGG id is just the ncbi geneid with the species id in front of it so ncbi-geneid:100504663 is just mmu:100504663
+query <- keggConv("genes", c("ncbi-geneid:100504663", "ncbi-geneid:100526464"))
+query
+
+# This will give you all the pathways associated with genes mmu: prefix will make sure that only mouse pathways are pulled up but theoreticslly you could put in ultiple species.
+keggLink("pathway", c("hsa:10458", "ece:Z5100"))
