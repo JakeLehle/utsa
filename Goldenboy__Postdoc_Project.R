@@ -845,6 +845,15 @@ intersect(gene.data$mgi_symbol, df_DEG_E16_c4$Gene)
 
 ########################################################
 
+#gets gene symbol, transcript_id and go_id for all genes annotated with GO:0006281
+gene.data <- getBM(attributes=c('mgi_symbol', 'strand', 'chromosome_name', 'start_position', 'end_position', 'go_id', 'entrezgene_id'),
+                   filters = 'mgi_symbol', values = list(DNA_Repair$Final.list.cell.repair), mart = ensembl)
+
+gene.data
+
+paste('mmu:', unique(gene.data$entrezgene_id), sep = '')[1:100]
+paste('mmu:', unique(gene.data$entrezgene_id), sep = '')[101:134]
+
 BiocManager::install("KEGGREST")
 listDatabases()
 org <- keggList("organism")
@@ -856,8 +865,6 @@ org[grep('mouse', org[, 'species']), , drop = FALSE]
 keggList('mmu')
 
 
-# To get all information about KEGG ids
-query <- keggGet(c("mmu:213056", "mmu:66495"))
 
 
 # looks like the KEGG id is just the ncbi geneid with the species id in front of it so ncbi-geneid:100504663 is just mmu:100504663
@@ -865,4 +872,87 @@ query <- keggConv("genes", c("ncbi-geneid:100504663", "ncbi-geneid:100526464"))
 query
 
 # This will give you all the pathways associated with genes mmu: prefix will make sure that only mouse pathways are pulled up but theoreticslly you could put in ultiple species.
-keggLink("pathway", c("hsa:10458", "ece:Z5100"))
+tmp <- as.data.frame(keggLink("pathway", paste('mmu:', unique(gene.data$entrezgene_id), sep = '')))
+tmp <- unique(tmp)
+rownames(tmp) <- NULL
+colnames(tmp) <- 'path'
+
+# To get all information about KEGG ids
+query <- keggGet(tmp$path)
+query
+DNA_Repair$Final.list.cell.repair
+
+tmp
+
+keggLink()
+##########################################################
+install.packages("plotly")
+library(plotly)
+
+install.packages("rminer", dependencies = T)
+library(rminer)
+install.packages("parsnip")
+library(parsnip)
+mice <- data.frame(
+  x = c(4, 7, 3, 5, 3, 3, 6, 5),
+  y = c(28, 43, 16, 30, 17, 15, 39, 30),
+  z = c(70000, 520000, 18000, 51000, 140000,70000, 125000, 135000)
+)
+mesh_size <- .02
+margin <- 0
+X <- mice %>% select(x, y)
+y <- mice %>% select(z)
+
+
+model <- svm_rbf(cost = 1.0) %>% 
+  set_engine("kernlab") %>% 
+  set_mode("regression") %>% 
+  fit(z ~ x + y, data = mice) 
+
+
+x_min <- min(X$x) - margin
+x_max <- max(X$x) - margin
+y_min <- min(X$y) - margin
+y_max <- max(X$y) - margin
+xrange <- seq(x_min, x_max, mesh_size)
+yrange <- seq(y_min, y_max, mesh_size)
+xy <- meshgrid(x = xrange, y = yrange)
+xx <- xy$X
+yy <- xy$Y
+dim_val <- dim(xx)
+xx1 <- matrix(xx, length(xx), 1)
+yy1 <- matrix(yy, length(yy), 1)
+final <- cbind(xx1, yy1)
+pred <- model %>%
+  predict(final)
+
+pred <- pred$.pred
+pred <- matrix(pred, dim_val[1], dim_val[2])
+
+fig <- plot_ly(mice, x = ~x, y = ~y, z = ~y ) %>% 
+  add_markers(size = 5) %>% 
+  add_surface(x=xrange, y=yrange, z=pred, alpha = 0.65, type = 'mesh3d', name = 'pred_surface')
+fig
+
+lm_model
+
+plot_ly(data = mice,x = ~x,y = ~y, z = ~z,type = "scatter3d",showlegend = FALSE)
+
+
+
+#######
+
+library(reshape2)
+install.packages("tidyverse")
+library(tidyverse)
+library(tidymodels)
+library(plotly)
+library(kernlab)
+library(pracma) #For meshgrid()
+data(iris)
+iris
+mesh_size <- .02
+margin <- 0
+X <- iris %>% select(Sepal.Width, Sepal.Length)
+X
+y <- iris %>% select(Petal.Width)
