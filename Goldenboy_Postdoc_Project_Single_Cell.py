@@ -157,14 +157,17 @@ adata_pp.var_names_make_unique() # this is unnecessary if using `var_names='gene
 adata_pp.obs['n_counts'] = adata_pp.X.sum(1) #first sum the counts
 adata_pp.obs['log_counts'] = np.log(adata_pp.obs['n_counts']) #now take the log of the n_counts
 adata_pp.obs['n_genes'] = (adata_pp.X > 0).sum(1) #find the number of expressed genes
-mt_gene_mask = [gene.startswith('mt-') for gene in adata_pp.var_names] #add the gene names
+mt_gene_mask = [gene.startswith(('mt-', 'MT-', 'Mt-')) for gene in adata_pp.var_names] #add the gene names
 adata_pp.obs['mt_frac'] = adata_pp.X[:, mt_gene_mask].sum(1)/adata_pp.obs['n_counts'] #filter the gene names using the expression > 0
+rb_gene_mask = [gene.startswith(('Rps', 'Rpl', 'RPS', 'RPL')) for gene in adata_pp.var_names] #add the gene names
+adata_pp.obs['rb_frac'] = adata_pp.X[:, rb_gene_mask].sum(1)/adata_pp.obs['n_counts'] #filter the gene names using the expression > 0
+
 #%%
 # Quality control - plot QC metrics
 #Sample quality plots
 t1 = sc.pl.violin(adata_pp, 'n_counts', groupby='sample', size=2, log=True, cut=0) #violin plot of the log caounts of reads for each sample. You can see that worst sample is the jej_M2 due to having the poorest quality of reads. However, there are still enough reads to process these cells. 
 t2 = sc.pl.violin(adata_pp, 'mt_frac', groupby='sample') #This shows the fraction of mitochondrial reads (MT frac) this should always be below 20-25%. Again you can see the jej_M2 is again the wost sample in the group but good enough to continue processing.
-
+t3 = sc.pl.violin(adata_pp, 'rb_frac', groupby='sample') #This shows the fraction of ribosomal reads 
 #Data quality summary plots
 p1 = sc.pl.scatter(adata_pp, 'n_counts', 'n_genes', color='mt_frac') #scatterplot of the number of genes vs the number of counts with MT fraction information. You can see in the lower portion of the graph there are cells with high read counts but not many genes the first throught would be to remove these cells as dying outliers but you can see that these cells are purple and have a low MT fraction. We will still probably filter out some of these in the future since they will be difficult to annotate (1000-4000 counts and <~500 genes) just keep this in mind right now.
 # This looks good the heat map of the points indicate the sample prep went very wel and only the cells with the fewsest number of gene counts had mitochondrial genes present which is another indaication they are dying and need to be filtered away.
@@ -184,13 +187,16 @@ plt.show()
 #%%
 # Filter cells according to identified QC thresholds:
 print('Total number of cells: {:d}'.format(adata_pp.n_obs))
-sc.pp.filter_cells(adata_pp, min_counts = 1500)
+sc.pp.filter_cells(adata_pp, min_counts = 500)
 print('Number of cells after min count filter: {:d}'.format(adata_pp.n_obs))
 sc.pp.filter_cells(adata_pp, max_counts = 40000)
 print('Number of cells after max count filter: {:d}'.format(adata_pp.n_obs))
-adata_pp = adata_pp[adata_pp.obs['mt_frac'] < 0.05]
+adata_pp = adata_pp[adata_pp.obs['mt_frac'] < 0.25]
 print('Number of cells after MT filter: {:d}'.format(adata_pp.n_obs))
-sc.pp.filter_cells(adata_pp, min_genes = 700)
+# filter for percent ribo > 0.05
+adata_pp = adata_pp[adata_pp.obs['rb_frac'] > 0.05]
+print('Number of cells after RB filter: {:d}'.format(adata_pp.n_obs))
+sc.pp.filter_cells(adata_pp, min_genes = 200)
 print('Number of cells after gene filter: {:d}'.format(adata_pp.n_obs))
 #Filter genes:
 print('Total number of genes: {:d}'.format(adata_pp.n_vars))
